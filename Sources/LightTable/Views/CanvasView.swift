@@ -86,6 +86,17 @@ struct CanvasView: View {
         return rect.intersection(CGRect(origin: .zero, size: contentSize))
     }
 
+    /// Every card's left/right edges, offered to `RulerZones` so a guide
+    /// being dragged in from the ruler can snap to them, the same way cards
+    /// snap to guides.
+    private var cardEdgesX: [Double] {
+        document.items.flatMap { [$0.x, $0.x + $0.width] }
+    }
+
+    private var cardEdgesY: [Double] {
+        document.items.flatMap { [$0.y, $0.y + $0.height] }
+    }
+
     private var marqueeRect: CGRect? {
         guard let start = marqueeStart, let current = marqueeCurrent else { return nil }
         return CGRect(
@@ -130,6 +141,8 @@ struct CanvasView: View {
                             zoom: zoom,
                             panOffset: panOffset,
                             rulerThickness: rulerThickness,
+                            cardEdgesX: cardEdgesX,
+                            cardEdgesY: cardEdgesY,
                             onSelectGuide: { id in
                                 document.selectedGuideID = id
                                 document.selectedIDs = []
@@ -160,6 +173,8 @@ struct CanvasView: View {
                         zoom: zoom,
                         panOffset: panOffset,
                         rulerThickness: rulerThickness,
+                        cardEdgesX: cardEdgesX,
+                        cardEdgesY: cardEdgesY,
                         onPendingGuideChanged: { pendingGuide = $0 },
                         onAddVerticalGuide: { x in document.addVerticalGuide(at: x) },
                         onAddHorizontalGuide: { y in document.addHorizontalGuide(at: y) }

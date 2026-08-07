@@ -27,6 +27,10 @@ struct GuideLinesLayer: View {
     let zoom: CGFloat
     let panOffset: CGSize
     let rulerThickness: Double
+    /// Card edges (in canvas-logical space) that a guide being repositioned
+    /// snaps to when brought close, same threshold as card-to-guide snapping.
+    let cardEdgesX: [Double]
+    let cardEdgesY: [Double]
 
     let onSelectGuide: (UUID) -> Void
     let onMoveGuide: (UUID, Double) -> Void
@@ -133,7 +137,8 @@ struct GuideLinesLayer: View {
                 }
 
                 let delta = orientation == .vertical ? value.translation.width : value.translation.height
-                draggingGuideLivePosition = baseline + delta
+                let raw = baseline + delta
+                draggingGuideLivePosition = snapped(raw, to: orientation == .vertical ? cardEdgesX : cardEdgesY)
             }
             .onEnded { _ in
                 defer {
@@ -152,5 +157,17 @@ struct GuideLinesLayer: View {
                     onMoveGuide(id, livePosition)
                 }
             }
+    }
+
+    /// Pulls `value` onto the closest entry in `edges` if one is within a
+    /// screen-space threshold (adjusted for zoom) — same pattern used to
+    /// snap a new guide to card edges while dragging it in from the ruler.
+    private func snapped(_ value: Double, to edges: [Double]) -> Double {
+        let threshold = 8.0 / max(zoom, 0.01)
+        guard let nearest = edges.min(by: { abs($0 - value) < abs($1 - value) }),
+              abs(nearest - value) <= threshold else {
+            return value
+        }
+        return nearest
     }
 }

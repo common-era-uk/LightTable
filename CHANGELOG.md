@@ -17,6 +17,7 @@ All notable changes to LightTable are tracked here, most recent first.
   - An initial attempt also added a `.equatable()` fast-path to skip rebuilding the guide layer when nothing guide-related changed; this was rolled back after it caused guide creation/positioning/snapping bugs (ruler drags jumping to the wrong position, some guides not rendering, snap not working) that weren't worth the extra performance.
 - Widened the About screen and split its instructions into three columns instead of two, since the list had grown long enough to need it again.
 - Fixed the Guides and Filenames toolbar buttons visibly popping — enlarging and looking pixelated for a moment before shrinking back — every time they were toggled on. They switched between two different button styles (`.bordered`/`.borderedProminent`) in an if/else, which SwiftUI treated as swapping in a whole new button rather than updating the existing one. Both now stay one continuous button, styled the same as every other plain toolbar button, with a circular background (matching the other buttons' own round hover highlight) applied while active.
+- Guides now also snap to nearby image edges — both while being dragged in from the ruler and while repositioning an already-placed guide — not just to other guides.
 
 ## 1.0.4 — 2026-08-06
 

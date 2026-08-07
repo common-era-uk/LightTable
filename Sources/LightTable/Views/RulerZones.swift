@@ -10,6 +10,10 @@ struct RulerZones: View {
     let zoom: CGFloat
     let panOffset: CGSize
     let rulerThickness: Double
+    /// Card edges (in canvas-logical space) that a guide being dragged in
+    /// snaps to when brought close, same threshold as card-to-guide snapping.
+    let cardEdgesX: [Double]
+    let cardEdgesY: [Double]
 
     let onPendingGuideChanged: (PendingGuide?) -> Void
     let onAddVerticalGuide: (Double) -> Void
@@ -50,7 +54,7 @@ struct RulerZones: View {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("viewport"))
             .onChanged { value in
                 NSCursor.crosshair.set()
-                let logicalY = (value.location.y - panOffset.height) / zoom
+                let logicalY = snapped((value.location.y - panOffset.height) / zoom, to: cardEdgesY)
                 onPendingGuideChanged(PendingGuide(orientation: .horizontal, position: logicalY))
             }
             .onEnded { value in
@@ -59,7 +63,7 @@ struct RulerZones: View {
                     NSCursor.arrow.set()
                 }
                 guard value.location.y >= rulerThickness else { return }
-                let logicalY = (value.location.y - panOffset.height) / zoom
+                let logicalY = snapped((value.location.y - panOffset.height) / zoom, to: cardEdgesY)
                 onAddHorizontalGuide(logicalY)
             }
     }
@@ -68,7 +72,7 @@ struct RulerZones: View {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("viewport"))
             .onChanged { value in
                 NSCursor.crosshair.set()
-                let logicalX = (value.location.x - panOffset.width) / zoom
+                let logicalX = snapped((value.location.x - panOffset.width) / zoom, to: cardEdgesX)
                 onPendingGuideChanged(PendingGuide(orientation: .vertical, position: logicalX))
             }
             .onEnded { value in
@@ -77,8 +81,20 @@ struct RulerZones: View {
                     NSCursor.arrow.set()
                 }
                 guard value.location.x >= rulerThickness else { return }
-                let logicalX = (value.location.x - panOffset.width) / zoom
+                let logicalX = snapped((value.location.x - panOffset.width) / zoom, to: cardEdgesX)
                 onAddVerticalGuide(logicalX)
             }
+    }
+
+    /// Pulls `value` onto the closest entry in `edges` if one is within a
+    /// screen-space threshold (adjusted for zoom) — same threshold cards use
+    /// to snap to guides, applied here to snap a new guide to card edges.
+    private func snapped(_ value: Double, to edges: [Double]) -> Double {
+        let threshold = 8.0 / max(zoom, 0.01)
+        guard let nearest = edges.min(by: { abs($0 - value) < abs($1 - value) }),
+              abs(nearest - value) <= threshold else {
+            return value
+        }
+        return nearest
     }
 }
