@@ -5,6 +5,7 @@ struct LightTableApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var recentFolders = RecentFoldersStore.shared
+    @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     var body: some Scene {
         WindowGroup(for: URL.self) { $folderURL in
@@ -42,11 +43,21 @@ struct LightTableApp: App {
                 Button("Change Guide Color…") {
                     NotificationCenter.default.post(name: .openGuideColorPicker, object: nil)
                 }
+                Divider()
+                Toggle("Show Shadows", isOn: $shadowSettings.enabled)
+                Button("Shadow Settings…") {
+                    openWindow(id: "shadowSettings")
+                }
             }
         }
 
         Window("About LightTable", id: "about") {
             AboutView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Shadow Settings", id: "shadowSettings") {
+            ShadowSettingsView()
         }
         .windowResizability(.contentSize)
     }

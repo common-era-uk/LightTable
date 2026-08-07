@@ -14,6 +14,7 @@ struct ImageCardView: View {
 
     @State private var liveRect: CGRect?
     @State private var dragBaseline: CGRect?
+    @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     private let minSize: Double = 40
 
@@ -33,7 +34,12 @@ struct ImageCardView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
                     )
-                    .shadow(radius: isSelected ? 6 : 2)
+                    .shadow(
+                        color: shadowSettings.enabled ? Color(.sRGBLinear, white: 0, opacity: shadowSettings.opacity) : .clear,
+                        radius: shadowSettings.enabled ? shadowSettings.blur * (isSelected ? 3 : 1) : 0,
+                        x: shadowSettings.enabled ? shadowSettings.offset.width : 0,
+                        y: shadowSettings.enabled ? shadowSettings.offset.height : 0
+                    )
                     .gesture(moveGesture)
                     .onTapGesture(count: 2) { cropModeItemID = itemID }
                     .onTapGesture { selectOnTap() }
