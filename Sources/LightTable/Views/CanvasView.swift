@@ -30,6 +30,9 @@ struct CanvasView: View {
 
     @State private var cropModeItemID: UUID?
     @State private var showRenameSheet = false
+    @State private var previewItemID: UUID?
+    @State private var isSpaceDown = false
+    @State private var spacePanBaseline: CGSize?
     @State private var showFilenames = false
     @State private var showGuides = true
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
@@ -180,6 +183,7 @@ struct CanvasView: View {
                         onAddHorizontalGuide: { y in document.addHorizontalGuide(at: y) }
                     )
                 }
+                spacePanOverlay
             }
             .coordinateSpace(name: "viewport")
             .frame(width: geo.size.width, height: geo.size.height)
@@ -308,6 +312,13 @@ struct CanvasView: View {
         } message: { message in
             Text(message)
         }
+        .overlay {
+            if let previewItemID, let item = document.items.first(where: { $0.id == previewItemID }) {
+                PreviewOverlayView(document: document, item: item, containerSize: viewportSize) {
+                    self.previewItemID = nil
+                }
+            }
+        }
     }
 
     private var cropSheetBinding: Binding<Bool> {
@@ -394,6 +405,35 @@ struct CanvasView: View {
             }
     }
 
+    // MARK: - Space-drag panning
+
+    /// While Space is held, a transparent layer sits on top of everything
+    /// else in the viewport (cards, guides, edge handles) so a click-drag
+    /// anywhere pans the canvas instead of moving a card or marquee-selecting
+    /// — it only takes over hit-testing while `isSpaceDown`, so it's
+    /// otherwise invisible to every gesture beneath it.
+    private var spacePanOverlay: some View {
+        Color.clear
+            .frame(width: viewportSize.width, height: viewportSize.height)
+            .contentShape(Rectangle())
+            .gesture(spacePanGesture)
+            .allowsHitTesting(isSpaceDown)
+    }
+
+    private var spacePanGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("viewport"))
+            .onChanged { value in
+                NSCursor.closedHand.set()
+                let baseline = spacePanBaseline ?? panOffset
+                if spacePanBaseline == nil { spacePanBaseline = baseline }
+                panOffset = CGSize(width: baseline.width + value.translation.width, height: baseline.height + value.translation.height)
+            }
+            .onEnded { _ in
+                spacePanBaseline = nil
+                NSCursor.openHand.set()
+            }
+    }
+
     // MARK: - Guides
     //
     // Rendering and gesture handling live in `GuideLinesLayer` and
@@ -463,6 +503,10 @@ struct CanvasView: View {
     /// rects the handles are drawn at, and forces the cursor to stay put
     /// during an active drag regardless of where the mouse strays.
     private func updateEdgeCursor(hovering location: CGPoint?) {
+        if isSpaceDown {
+            (spacePanBaseline != nil ? NSCursor.closedHand : NSCursor.openHand).set()
+            return
+        }
         if let draggingEdge {
             (draggingEdge == .right ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
             return
@@ -591,8 +635,20 @@ struct CanvasView: View {
     }
 
     private func installKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             guard event.window === hostWindow else { return event }
+
+            // Releasing Space always clears the pan-tool state, even if a
+            // sheet opened while it was held, so it can never get stuck on.
+            if event.keyCode == 49, event.type == .keyUp {
+                if isSpaceDown {
+                    isSpaceDown = false
+                    NSCursor.arrow.set()
+                }
+                return event
+            }
+            guard event.type == .keyDown else { return event }
+
             if event.keyCode == 51 || event.keyCode == 117 {
                 if let guideID = document.selectedGuideID {
                     document.removeGuide(guideID)
@@ -607,6 +663,71 @@ struct CanvasView: View {
                     return nil
                 }
             }
+
+            guard cropModeItemID == nil, !showRenameSheet else { return event }
+
+            // Space toggles a large preview of the single selected card,
+            // closed again with Space or Escape — like Quick Look. Holding
+            // it instead (no card open for preview) arms a pan tool so
+            // click-drag anywhere on the canvas pans it, like a touchpad
+            // swipe — the `isARepeat` guard keeps the OS's key-repeat from
+            // re-toggling the preview on every tick while held.
+            if event.keyCode == 49 {
+                guard !event.isARepeat else { return nil }
+                if previewItemID != nil {
+                    previewItemID = nil
+                    return nil
+                }
+                if document.selectedIDs.count == 1 {
+                    previewItemID = document.selectedIDs.first
+                    return nil
+                }
+                isSpaceDown = true
+                NSCursor.openHand.set()
+                return nil
+            }
+            if event.keyCode == 53, previewItemID != nil {
+                previewItemID = nil
+                return nil
+            }
+
+            // While previewing, left/right step through the canvas's
+            // reading order instead of nudging — reaching the end of a row
+            // naturally continues onto the next one, since reading order is
+            // already flattened row by row. Up/down instead jump a whole
+            // row, landing on whichever card in that row is horizontally
+            // closest to the current one.
+            if let currentPreviewID = previewItemID {
+                guard [123, 124, 125, 126].contains(event.keyCode) else { return event }
+                if event.keyCode == 123 || event.keyCode == 124 {
+                    let order = document.readingOrder()
+                    guard let index = order.firstIndex(where: { $0.id == currentPreviewID }) else { return event }
+                    let nextIndex = event.keyCode == 124 ? index + 1 : index - 1
+                    guard order.indices.contains(nextIndex) else { return nil }
+                    previewItemID = order[nextIndex].id
+                    document.selectedIDs = [order[nextIndex].id]
+                } else {
+                    let rows = document.readingOrderRows()
+                    guard let rowIndex = rows.firstIndex(where: { row in row.contains { $0.id == currentPreviewID } }),
+                          let current = rows[rowIndex].first(where: { $0.id == currentPreviewID }) else { return event }
+                    let targetRowIndex = event.keyCode == 125 ? rowIndex + 1 : rowIndex - 1
+                    guard rows.indices.contains(targetRowIndex), let closest = rows[targetRowIndex].min(by: {
+                        abs($0.frame.midX - current.frame.midX) < abs($1.frame.midX - current.frame.midX)
+                    }) else { return nil }
+                    previewItemID = closest.id
+                    document.selectedIDs = [closest.id]
+                }
+                return nil
+            }
+
+            let step: Double = event.modifierFlags.contains(.shift) ? 10 : 1
+            switch event.keyCode {
+            case 123: nudgeSelection(dx: -step, dy: 0); return nil
+            case 124: nudgeSelection(dx: step, dy: 0); return nil
+            case 125: nudgeSelection(dx: 0, dy: step); return nil
+            case 126: nudgeSelection(dx: 0, dy: -step); return nil
+            default: break
+            }
             return event
         }
     }
@@ -616,6 +737,28 @@ struct CanvasView: View {
             NSEvent.removeMonitor(keyMonitor)
         }
         keyMonitor = nil
+    }
+
+    /// Moves every selected card by the same offset, clamped so the group's
+    /// leading/top edge can't cross 0 — same clamp used for drag-moves.
+    /// Registered as its own undo step per key press, matching how each
+    /// discrete drag-move is its own step.
+    private func nudgeSelection(dx: Double, dy: Double) {
+        let ids = document.selectedIDs
+        let selected = document.items.filter { ids.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        let minX = selected.map(\.x).min() ?? 0
+        let minY = selected.map(\.y).min() ?? 0
+        let clampedDx = max(dx, -minX)
+        let clampedDy = max(dy, -minY)
+        guard clampedDx != 0 || clampedDy != 0 else { return }
+
+        document.registerUndoCheckpoint(actionName: "Nudge")
+        document.updateItems(ids) { current in
+            current.x += clampedDx
+            current.y += clampedDy
+        }
+        document.save()
     }
 
     private func installScrollMonitor() {

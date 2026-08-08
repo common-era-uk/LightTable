@@ -44,10 +44,20 @@ struct LightTableApp: App {
                     NotificationCenter.default.post(name: .openGuideColorPicker, object: nil)
                 }
                 Divider()
-                Toggle("Show Shadows", isOn: $shadowSettings.enabled)
+                Button("Toggle Shadows") {
+                    shadowSettings.enabled.toggle()
+                }
                 Button("Shadow Settings…") {
                     openWindow(id: "shadowSettings")
                 }
+                Button("Large Preview Background Settings…") {
+                    openWindow(id: "previewBackground")
+                }
+                // Without this, this whole run gets merged with the
+                // system's own "Enter Full Screen" item right after it —
+                // and since that item has an icon, AppKit reserves icon
+                // space for every item sharing its run, indenting ours too.
+                Divider()
             }
         }
 
@@ -58,6 +68,11 @@ struct LightTableApp: App {
 
         Window("Shadow Settings", id: "shadowSettings") {
             ShadowSettingsView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Large Preview Background", id: "previewBackground") {
+            PreviewBackgroundSettingsView()
         }
         .windowResizability(.contentSize)
     }

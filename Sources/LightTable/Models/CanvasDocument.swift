@@ -514,6 +514,13 @@ final class CanvasDocument: ObservableObject {
     /// Top-to-bottom rows, left-to-right within a row, computed from current
     /// card positions on the canvas.
     func readingOrder() -> [CanvasItem] {
+        readingOrderRows().flatMap { $0 }
+    }
+
+    /// Same grouping as `readingOrder()`, but keeping each row separate so
+    /// up/down navigation can find the item in the neighboring row closest
+    /// to the current one's horizontal position.
+    func readingOrderRows() -> [[CanvasItem]] {
         guard !items.isEmpty else { return [] }
         let sortedByY = items.sorted { $0.y < $1.y }
         let avgHeight = items.reduce(0.0) { $0 + $1.height } / Double(items.count)
@@ -533,6 +540,6 @@ final class CanvasDocument: ObservableObject {
         }
         if !currentRow.isEmpty { rows.append(currentRow) }
 
-        return rows.flatMap { row in row.sorted { $0.x < $1.x } }
+        return rows.map { row in row.sorted { $0.x < $1.x } }
     }
 }

@@ -19,6 +19,14 @@ All notable changes to LightTable are tracked here, most recent first.
 - Fixed the Guides and Filenames toolbar buttons visibly popping — enlarging and looking pixelated for a moment before shrinking back — every time they were toggled on. They switched between two different button styles (`.bordered`/`.borderedProminent`) in an if/else, which SwiftUI treated as swapping in a whole new button rather than updating the existing one. Both now stay one continuous button, styled the same as every other plain toolbar button, with a circular background (matching the other buttons' own round hover highlight) applied while active.
 - Guides now also snap to nearby image edges — both while being dragged in from the ruler and while repositioning an already-placed guide — not just to other guides.
 - Added View > "Show Shadows" (toggles image card drop shadows on/off) and View > "Shadow Settings…" (adjusts distance, angle, blur, and opacity), separated from the Guides options by a divider. Unlike canvas/guide color, this applies app-wide across every folder rather than being saved per canvas, and is remembered across launches.
+- Arrow keys now nudge the selected image(s) by 1pt — hold Shift for 10pt. Each nudge is its own undo step.
+- Added a large image preview: select a single image and press Space to see it big, like Quick Look — Space, Escape, or a click closes it again. While previewing, left/right arrow keys step to the next/previous image in the canvas's reading order, wrapping onto the next or previous row at the end of a row.
+- Fixed "Toggle Shadows" (originally "Show Shadows") sitting at a deeper indent than the other View menu items — it was a checkbox-style item, and macOS reserves extra indent for every item in the same menu section once one of them can show a checkmark. It's now a plain action, matching "Toggle Guides".
+- While previewing, up/down arrow keys now jump a row, landing on whichever image in that row is closest horizontally to the one you're on.
+- Holding Space and click-dragging anywhere on the canvas now pans it, the same as a two-finger trackpad swipe.
+- Fixed "Toggle Shadows" and "Shadow Settings…" still showing indented in the View menu — they were sharing an unbroken run with the system's own "Enter Full Screen" item right after them, which has an icon; AppKit reserves icon space for every item in a shared run. Added a divider to close off the run, above "Enter Full Screen".
+- Added View > "Large Preview Background Settings…" to set the color and opacity behind a large image preview (Space), next to the Shadow options.
+- Large Preview Background Settings now also has a "Show filename" toggle and a filename color picker for the label shown under a large preview.
 
 ## 1.0.4 — 2026-08-06
 
