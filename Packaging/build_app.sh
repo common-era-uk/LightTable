@@ -14,6 +14,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp ".build/release/$APP_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "Packaging/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "Packaging/Resources/LightTable.icns" "$APP_BUNDLE/Contents/Resources/LightTable.icns"
+cp "CHANGELOG.md" "$APP_BUNDLE/Contents/Resources/CHANGELOG.md"
 
 codesign --force --deep --sign - "$APP_BUNDLE"
 

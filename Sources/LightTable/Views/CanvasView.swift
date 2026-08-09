@@ -33,9 +33,14 @@ struct CanvasView: View {
     @State private var previewItemID: UUID?
     @State private var isSpaceDown = false
     @State private var spacePanBaseline: CGSize?
+    @State private var spacePanVelocity: CGSize = .zero
+    @State private var spacePanLastTranslation: CGSize = .zero
+    @State private var spacePanLastSampleTime: Date = Date()
+    @State private var spacePanMomentumTimer: Timer?
     @State private var showFilenames = false
     @State private var showGuides = true
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
+    @State private var exportFormatCoordinator: ExportFormatCoordinator?
     @State private var keyMonitor: Any?
     @State private var scrollMonitor: Any?
     @State private var zoom: CGFloat = 1.0
@@ -289,6 +294,7 @@ struct CanvasView: View {
         .onDisappear {
             removeKeyMonitor()
             removeScrollMonitor()
+            spacePanMomentumTimer?.invalidate()
         }
         .onChange(of: hostWindow) { _, newWindow in
             // Setting this gives the window a proxy icon and lets the user
@@ -424,14 +430,56 @@ struct CanvasView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("viewport"))
             .onChanged { value in
                 NSCursor.closedHand.set()
+                if spacePanBaseline == nil {
+                    spacePanMomentumTimer?.invalidate()
+                    spacePanBaseline = panOffset
+                    spacePanLastTranslation = .zero
+                    spacePanLastSampleTime = Date()
+                    spacePanVelocity = .zero
+                }
                 let baseline = spacePanBaseline ?? panOffset
-                if spacePanBaseline == nil { spacePanBaseline = baseline }
                 panOffset = CGSize(width: baseline.width + value.translation.width, height: baseline.height + value.translation.height)
+
+                // Sample velocity from the translation delta since the last
+                // tick, so a released drag can carry on with the same
+                // trailing speed — matching the trackpad's own momentum.
+                let now = Date()
+                let dt = now.timeIntervalSince(spacePanLastSampleTime)
+                if dt > 0.008 {
+                    spacePanVelocity = CGSize(
+                        width: (value.translation.width - spacePanLastTranslation.width) / dt,
+                        height: (value.translation.height - spacePanLastTranslation.height) / dt
+                    )
+                    spacePanLastTranslation = value.translation
+                    spacePanLastSampleTime = now
+                }
             }
             .onEnded { _ in
                 spacePanBaseline = nil
                 NSCursor.openHand.set()
+                startSpacePanMomentum()
             }
+    }
+
+    /// Carries the pan on after release with the drag's trailing velocity,
+    /// decaying by friction every frame until it's imperceptible — the same
+    /// deceleration feel as a trackpad swipe's momentum scrolling.
+    private func startSpacePanMomentum() {
+        spacePanMomentumTimer?.invalidate()
+        guard abs(spacePanVelocity.width) > 20 || abs(spacePanVelocity.height) > 20 else { return }
+
+        let friction = 0.93
+        let frameInterval = 1.0 / 60.0
+        spacePanMomentumTimer = Timer.scheduledTimer(withTimeInterval: frameInterval, repeats: true) { timer in
+            spacePanVelocity = CGSize(width: spacePanVelocity.width * friction, height: spacePanVelocity.height * friction)
+            panOffset = CGSize(
+                width: panOffset.width + spacePanVelocity.width * frameInterval,
+                height: panOffset.height + spacePanVelocity.height * frameInterval
+            )
+            if abs(spacePanVelocity.width) < 3, abs(spacePanVelocity.height) < 3 {
+                timer.invalidate()
+            }
+        }
     }
 
     // MARK: - Guides
@@ -597,16 +645,21 @@ struct CanvasView: View {
         }
 
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png, .jpeg]
         panel.canCreateDirectories = true
         let suffix = cropToVisible ? " (visible)" : ""
-        panel.nameFieldStringValue = "\(document.folderURL.lastPathComponent)\(suffix).png"
+        let baseName = "\(document.folderURL.lastPathComponent)\(suffix)"
+        panel.allowedContentTypes = [.png]
+        panel.nameFieldStringValue = "\(baseName).png"
+        let formatCoordinator = ExportFormatCoordinator(panel: panel, baseName: baseName)
+        exportFormatCoordinator = formatCoordinator
+        panel.accessoryView = formatCoordinator.makeAccessoryView()
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
         let bitmapRep = NSBitmapImageRep(cgImage: finalImage)
         let isJPEG = ["jpg", "jpeg"].contains(url.pathExtension.lowercased())
         let fileType: NSBitmapImageRep.FileType = isJPEG ? .jpeg : .png
-        guard let data = bitmapRep.representation(using: fileType, properties: [:]) else { return }
+        let properties: [NSBitmapImageRep.PropertyKey: Any] = isJPEG ? [.compressionFactor: 0.9] : [:]
+        guard let data = bitmapRep.representation(using: fileType, properties: properties) else { return }
         try? data.write(to: url)
     }
 
@@ -808,5 +861,59 @@ private struct CanvasDropDelegate: DropDelegate {
 
     func validateDrop(info: DropInfo) -> Bool {
         info.hasItemsConforming(to: [.fileURL])
+    }
+}
+
+private enum ExportImageFormat: String, CaseIterable, Identifiable {
+    case png, jpeg
+
+    var id: String { rawValue }
+    var label: String { self == .png ? "PNG" : "JPEG" }
+    var fileExtension: String { self == .png ? "png" : "jpg" }
+    var contentType: UTType { self == .png ? .png : .jpeg }
+}
+
+/// A save panel accessory letting the user pick PNG or JPEG — updates the
+/// panel's allowed type and the name field's extension to match, in place
+/// like Preview's own export panel. Built as a plain `NSPopUpButton` with
+/// target-action rather than a SwiftUI `Picker` in an `NSHostingView`: a
+/// `.menu`-style `Picker` embedded as an `NSSavePanel` accessory view didn't
+/// reliably respond to clicks — this mirrors the same target-action
+/// bridging pattern already used for the canvas/guide color pickers.
+private final class ExportFormatCoordinator: NSObject {
+    let panel: NSSavePanel
+    let baseName: String
+
+    init(panel: NSSavePanel, baseName: String) {
+        self.panel = panel
+        self.baseName = baseName
+    }
+
+    func makeAccessoryView() -> NSView {
+        let label = NSTextField(labelWithString: "Format:")
+
+        let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        popUp.addItems(withTitles: ExportImageFormat.allCases.map(\.label))
+        popUp.target = self
+        popUp.action = #selector(formatChanged(_:))
+
+        let stack = NSStackView(views: [label, popUp])
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 44))
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+        return container
+    }
+
+    @objc private func formatChanged(_ sender: NSPopUpButton) {
+        let format = ExportImageFormat.allCases[sender.indexOfSelectedItem]
+        panel.allowedContentTypes = [format.contentType]
+        panel.nameFieldStringValue = "\(baseName).\(format.fileExtension)"
     }
 }

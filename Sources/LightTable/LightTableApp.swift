@@ -59,6 +59,11 @@ struct LightTableApp: App {
                 // space for every item sharing its run, indenting ours too.
                 Divider()
             }
+            CommandGroup(replacing: .help) {
+                Button("LightTable Help") {
+                    openWindow(id: "about")
+                }
+            }
         }
 
         Window("About LightTable", id: "about") {
