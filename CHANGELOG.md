@@ -16,6 +16,8 @@ All notable changes to LightTable are tracked here, most recent first.
 - "Save Visible Area…" and "Save Whole Canvas…" now offer a PNG/JPEG format dropdown in the save panel (updating the filename's extension to match), instead of only picking format from a typed file extension.
 - Fixed the format dropdown not responding to clicks — it was a SwiftUI menu-style picker embedded in the save panel, which didn't reliably receive clicks there; rebuilt as a plain native dropdown, the same technique already used for the canvas/guide color pickers.
 - Space-drag panning now carries on briefly after you let go, decelerating the same way trackpad momentum scrolling does, instead of stopping dead the instant you release the mouse.
+- The app is now signed with a real Developer ID and notarized by Apple, so downloading it no longer triggers a Gatekeeper warning.
+- Added LightTable > "Check for Updates…" — checks for and installs new versions automatically, without needing to be sent a fresh copy each time.
 
 ## 1.0.5 — 2026-08-07
 

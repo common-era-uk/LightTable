@@ -3,3 +3,6 @@
 LightTable.app/
 LightTable.zip
 *.psd
+releases/
+Packaging/sparkle-tools/
+LightTable-notarize.zip

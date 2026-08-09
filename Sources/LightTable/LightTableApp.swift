@@ -1,4 +1,5 @@
 import SwiftUI
+import Sparkle
 
 @main
 struct LightTableApp: App {
@@ -6,6 +7,8 @@ struct LightTableApp: App {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var recentFolders = RecentFoldersStore.shared
     @ObservedObject private var shadowSettings = ShadowSettings.shared
+
+    private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     var body: some Scene {
         WindowGroup(for: URL.self) { $folderURL in
@@ -16,6 +19,9 @@ struct LightTableApp: App {
             CommandGroup(replacing: .appInfo) {
                 Button("About LightTable") {
                     openWindow(id: "about")
+                }
+                Button("Check for Updates…") {
+                    updaterController.checkForUpdates(nil)
                 }
             }
             CommandGroup(after: .newItem) {
