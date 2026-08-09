@@ -2,6 +2,21 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.0.6 — 2026-08-09
+
+- Fixed "Toggle Shadows" (originally "Show Shadows") sitting at a deeper indent than the other View menu items — it was a checkbox-style item, and macOS reserves extra indent for every item in the same menu section once one of them can show a checkmark. It's now a plain action, matching "Toggle Guides".
+- While previewing, up/down arrow keys now jump a row, landing on whichever image in that row is closest horizontally to the one you're on.
+- Holding Space and click-dragging anywhere on the canvas now pans it, the same as a two-finger trackpad swipe.
+- Fixed "Toggle Shadows" and "Shadow Settings…" still showing indented in the View menu — they were sharing an unbroken run with the system's own "Enter Full Screen" item right after them, which has an icon; AppKit reserves icon space for every item in a shared run. Added a divider to close off the run, above "Enter Full Screen".
+- Added View > "Large Preview Background Settings…" to set the color and opacity behind a large image preview (Space), next to the Shadow options.
+- Large Preview Background Settings now also has a "Show filename" toggle and a filename color picker for the label shown under a large preview.
+- Redesigned the About screen: a left-hand sidebar ("Getting Started", "Details", "Exporting") now switches between sections with a fade, instead of one long three-column list. Sidebar titles turn black on hover and while active, dark grey otherwise. Added a "View Changelog" link under the credit line that swaps the content area for a scrollable, live copy of this changelog. "Pan the canvas" and "Pan with Space" are now one combined tip.
+- Fixed the About screen's window bobbing up and down when switching sections — its content area now has a fixed height and scrolls internally, so the window itself never resizes to fit whatever text happens to be showing.
+- Fixed Help > "LightTable Help" saying help wasn't available — it now opens the About screen.
+- "Save Visible Area…" and "Save Whole Canvas…" now offer a PNG/JPEG format dropdown in the save panel (updating the filename's extension to match), instead of only picking format from a typed file extension.
+- Fixed the format dropdown not responding to clicks — it was a SwiftUI menu-style picker embedded in the save panel, which didn't reliably receive clicks there; rebuilt as a plain native dropdown, the same technique already used for the canvas/guide color pickers.
+- Space-drag panning now carries on briefly after you let go, decelerating the same way trackpad momentum scrolling does, instead of stopping dead the instant you release the mouse.
+
 ## 1.0.5 — 2026-08-07
 
 - Changed Delete to remove an image from the canvas without touching its file — the file stays in the folder and is marked so it won't be auto-imported again on the next open/Refresh. Drag it back onto the canvas from Finder to bring it back.
@@ -21,21 +36,6 @@ All notable changes to LightTable are tracked here, most recent first.
 - Added View > "Show Shadows" (toggles image card drop shadows on/off) and View > "Shadow Settings…" (adjusts distance, angle, blur, and opacity), separated from the Guides options by a divider. Unlike canvas/guide color, this applies app-wide across every folder rather than being saved per canvas, and is remembered across launches.
 - Arrow keys now nudge the selected image(s) by 1pt — hold Shift for 10pt. Each nudge is its own undo step.
 - Added a large image preview: select a single image and press Space to see it big, like Quick Look — Space, Escape, or a click closes it again. While previewing, left/right arrow keys step to the next/previous image in the canvas's reading order, wrapping onto the next or previous row at the end of a row.
-
-## 1.0.6 — 2026-08-09
-
-- Fixed "Toggle Shadows" (originally "Show Shadows") sitting at a deeper indent than the other View menu items — it was a checkbox-style item, and macOS reserves extra indent for every item in the same menu section once one of them can show a checkmark. It's now a plain action, matching "Toggle Guides".
-- While previewing, up/down arrow keys now jump a row, landing on whichever image in that row is closest horizontally to the one you're on.
-- Holding Space and click-dragging anywhere on the canvas now pans it, the same as a two-finger trackpad swipe.
-- Fixed "Toggle Shadows" and "Shadow Settings…" still showing indented in the View menu — they were sharing an unbroken run with the system's own "Enter Full Screen" item right after them, which has an icon; AppKit reserves icon space for every item in a shared run. Added a divider to close off the run, above "Enter Full Screen".
-- Added View > "Large Preview Background Settings…" to set the color and opacity behind a large image preview (Space), next to the Shadow options.
-- Large Preview Background Settings now also has a "Show filename" toggle and a filename color picker for the label shown under a large preview.
-- Redesigned the About screen: a left-hand sidebar ("Getting Started", "Details", "Exporting") now switches between sections with a fade, instead of one long three-column list. Sidebar titles turn black on hover and while active, dark grey otherwise. Added a "View Changelog" link under the credit line that swaps the content area for a scrollable, live copy of this changelog. "Pan the canvas" and "Pan with Space" are now one combined tip.
-- Fixed the About screen's window bobbing up and down when switching sections — its content area now has a fixed height and scrolls internally, so the window itself never resizes to fit whatever text happens to be showing.
-- Fixed Help > "LightTable Help" saying help wasn't available — it now opens the About screen.
-- "Save Visible Area…" and "Save Whole Canvas…" now offer a PNG/JPEG format dropdown in the save panel (updating the filename's extension to match), instead of only picking format from a typed file extension.
-- Fixed the format dropdown not responding to clicks — it was a SwiftUI menu-style picker embedded in the save panel, which didn't reliably receive clicks there; rebuilt as a plain native dropdown, the same technique already used for the canvas/guide color pickers.
-- Space-drag panning now carries on briefly after you let go, decelerating the same way trackpad momentum scrolling does, instead of stopping dead the instant you release the mouse.
 
 ## 1.0.4 — 2026-08-06
 
