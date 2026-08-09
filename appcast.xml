@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>LightTable</title>
+        <item>
+            <title>1.0.6</title>
+            <pubDate>Sun, 09 Aug 2026 23:43:43 +0100</pubDate>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.0.6/LightTable-1.0.6.zip" length="1732014" type="application/octet-stream" sparkle:edSignature="j7A0xMM4JkTXjChryMU4Qv9H+6mQ0wB7BYD+E+F973xHos+XR13vdwrKp4NfILAx+W0yGd9HJYHO7fTTNNplBQ=="/>
+        </item>
+    </channel>
+</rss>
