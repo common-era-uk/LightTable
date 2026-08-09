@@ -2,3 +2,4 @@
 .build/
 LightTable.app/
 LightTable.zip
+*.psd
