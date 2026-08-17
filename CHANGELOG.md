@@ -2,6 +2,15 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.0.7 — 2026-08-17
+
+- Added a Crop toolbar button (next to Delete) and Edit > Crop — both open the crop tool for the selected image, same as double-clicking it.
+- Wired up Edit > Delete to remove the selected image(s) from the canvas, the same as the toolbar Delete button or the Delete key.
+- Added a Duplicate feature: the toolbar's Duplicate button (before Crop) or Edit > Duplicate (⌘D) copies the selected image(s) as new "-copy" (then "-copy-2", etc.) files added right next to the originals — handy for trying a few different crops of the same image.
+- Added "Copy and Rename in a Different Folder…" to the rename panel — copies files under their planned new names into a folder you choose, instead of renaming the originals in place.
+- Cleaned up the Edit menu: removed Cut/Copy/Paste (they never did anything), wired up Select All to select every image on the canvas, and added "Bulk Rename…" to open the rename panel.
+- Added View > "Refresh and Reflow", the same action as the toolbar's Refresh button.
+
 ## 1.0.6 — 2026-08-09
 
 - Fixed "Toggle Shadows" (originally "Show Shadows") sitting at a deeper indent than the other View menu items — it was a checkbox-style item, and macOS reserves extra indent for every item in the same menu section once one of them can show a checkmark. It's now a plain action, matching "Toggle Guides".

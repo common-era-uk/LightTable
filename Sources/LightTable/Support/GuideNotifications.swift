@@ -9,4 +9,10 @@ import Foundation
 extension Notification.Name {
     static let toggleShowGuides = Notification.Name("LightTable.toggleShowGuides")
     static let openGuideColorPicker = Notification.Name("LightTable.openGuideColorPicker")
+    static let cropSelected = Notification.Name("LightTable.cropSelected")
+    static let deleteSelected = Notification.Name("LightTable.deleteSelected")
+    static let duplicateSelected = Notification.Name("LightTable.duplicateSelected")
+    static let selectAllItems = Notification.Name("LightTable.selectAllItems")
+    static let bulkRename = Notification.Name("LightTable.bulkRename")
+    static let refreshAndReflow = Notification.Name("LightTable.refreshAndReflow")
 }

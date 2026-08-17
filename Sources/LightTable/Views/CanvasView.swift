@@ -237,12 +237,20 @@ struct CanvasView: View {
                 .symbolRenderingMode(.multicolor)
                 .help("Set a custom canvas background color")
                 Divider()
-                Button("Delete", systemImage: "trash") {
-                    if let guideID = document.selectedGuideID {
-                        document.removeGuide(guideID)
-                    } else {
-                        document.removeFromCanvas(document.selectedIDs)
+                Button("Duplicate", systemImage: "plus.square.on.square") {
+                    document.duplicateItems(document.selectedIDs)
+                }
+                .disabled(document.selectedIDs.isEmpty)
+                .help("Duplicate the selected image(s), each as a new \"-copy\" file added to the canvas")
+                Button("Crop", systemImage: "crop") {
+                    if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
+                        cropModeItemID = id
                     }
+                }
+                .disabled(document.selectedIDs.count != 1)
+                .help("Crop the selected image")
+                Button("Delete", systemImage: "trash") {
+                    performDelete()
                 }
                 .keyboardShortcut(.delete, modifiers: [])
                 .disabled(document.selectedIDs.isEmpty && document.selectedGuideID == nil)
@@ -282,6 +290,33 @@ struct CanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openGuideColorPicker)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             showGuideColorPanel()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .cropSelected)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
+                cropModeItemID = id
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .deleteSelected)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            performDelete()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .duplicateSelected)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            document.duplicateItems(document.selectedIDs)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .selectAllItems)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            document.selectedIDs = Set(document.items.map(\.id))
+            document.selectedGuideID = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bulkRename)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            showRenameSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshAndReflow)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            document.refreshFromDisk()
         }
         .onAppear {
             installKeyMonitor()
@@ -390,6 +425,17 @@ struct CanvasView: View {
         panel.setAction(#selector(ColorPanelCoordinator.colorChanged(_:)))
         panel.color = NSColor(current)
         panel.orderFront(nil)
+    }
+
+    /// Shared by the toolbar's Delete button and the Edit menu's Delete
+    /// item: deletes the selected guide if one is selected, else removes
+    /// the selected cards from the canvas (keeping their files).
+    private func performDelete() {
+        if let guideID = document.selectedGuideID {
+            document.removeGuide(guideID)
+        } else {
+            document.removeFromCanvas(document.selectedIDs)
+        }
     }
 
     // MARK: - Marquee (click-drag) multi-select

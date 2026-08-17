@@ -24,6 +24,26 @@ struct LightTableApp: App {
                     updaterController.checkForUpdates(nil)
                 }
             }
+            CommandGroup(replacing: .pasteboard) {
+                Button("Duplicate") {
+                    NotificationCenter.default.post(name: .duplicateSelected, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: .command)
+                Button("Crop") {
+                    NotificationCenter.default.post(name: .cropSelected, object: nil)
+                }
+                Button("Delete") {
+                    NotificationCenter.default.post(name: .deleteSelected, object: nil)
+                }
+                Divider()
+                Button("Select All") {
+                    NotificationCenter.default.post(name: .selectAllItems, object: nil)
+                }
+                .keyboardShortcut("a", modifiers: .command)
+                Button("Bulk Rename…") {
+                    NotificationCenter.default.post(name: .bulkRename, object: nil)
+                }
+            }
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
                     if recentFolders.urls.isEmpty {
@@ -58,6 +78,10 @@ struct LightTableApp: App {
                 }
                 Button("Large Preview Background Settings…") {
                     openWindow(id: "previewBackground")
+                }
+                Divider()
+                Button("Refresh and Reflow") {
+                    NotificationCenter.default.post(name: .refreshAndReflow, object: nil)
                 }
                 // Without this, this whole run gets merged with the
                 // system's own "Enter Full Screen" item right after it —

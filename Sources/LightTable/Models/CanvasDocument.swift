@@ -465,6 +465,48 @@ final class CanvasDocument: ObservableObject {
         save()
     }
 
+    /// Copies each selected item's file (named with a "-copy" suffix, or
+    /// "-copy-2" etc. if that's already taken) and adds the copy to the
+    /// canvas just offset from the original — same position/size/crop to
+    /// start, so e.g. two different crops of the same image can be tried
+    /// side by side. The originals are left untouched.
+    func duplicateItems(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let fm = FileManager.default
+        let targets = items.filter { ids.contains($0.id) }
+        guard !targets.isEmpty else { return }
+
+        var newItems: [CanvasItem] = []
+        var copiedURLs: [URL] = []
+
+        for item in targets {
+            let sourceURL = folderURL.appendingPathComponent(item.filename)
+            let newName = ImageFileSupport.duplicateFilename(for: item.filename, in: folderURL)
+            let destURL = folderURL.appendingPathComponent(newName)
+            guard (try? fm.copyItem(at: sourceURL, to: destURL)) != nil else { continue }
+
+            copiedURLs.append(destURL)
+            var newItem = item
+            newItem.id = UUID()
+            newItem.filename = newName
+            newItem.fileID = ImageFileSupport.fileID(of: destURL)
+            newItem.x += 24
+            newItem.y += 24
+            newItems.append(newItem)
+        }
+        guard !newItems.isEmpty else { return }
+
+        registerUndoCheckpoint(actionName: "Duplicate") { _ in
+            for url in copiedURLs {
+                try? fm.trashItem(at: url, resultingItemURL: nil)
+            }
+        }
+
+        items.append(contentsOf: newItems)
+        selectedIDs = Set(newItems.map { $0.id })
+        save()
+    }
+
     // MARK: - Guides
 
     @discardableResult

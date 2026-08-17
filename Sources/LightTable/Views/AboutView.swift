@@ -25,13 +25,14 @@ struct AboutView: View {
         ("Zoom in / out", "Hold ⌘ and scroll, or use the + / − buttons in the toolbar."),
         ("Move an image", "Click and drag it. Drag on empty canvas to select multiple. With one or more selected, the arrow keys nudge them by 1pt — hold Shift for 10pt."),
         ("Resize an image", "Drag a corner handle — the aspect ratio stays locked. With multiple images selected, hold ⌘ while dragging a handle to scale all of them together, by the same amount."),
+        ("Undo", "Press ⌘Z to undo your last change — move, resize, crop, delete, rename, and more — up to 10 steps back. Undoing a delete restores the file from Trash."),
     ]
 
     private let gettingStartedRight: [(title: String, detail: String)] = [
         ("Preview an image", "Select a single image and press Space to see it large, like Quick Look. While previewing, the left/right arrow keys step to the next or previous image in canvas reading order, and up/down jump a row, landing on whichever image is closest horizontally. Press Space or Escape again, or click, to close it."),
-        ("Crop an image", "Double-click it to open the crop tool. \"Apply\" saves the crop on the canvas without touching the file. \"Apply & Export\" also writes a cropped copy into the canvas folder, named with a \"-crop\" suffix."),
-        ("Delete an image", "Select it and press Delete (or the toolbar's Delete button) to remove it from the canvas — the file stays in the folder and won't be re-added automatically; drag it back onto the canvas to bring it back. Press ⌘-Delete instead to also move the file to Trash."),
-        ("Undo", "Press ⌘Z to undo your last change — move, resize, crop, delete, rename, and more — up to 10 steps back. Undoing a delete restores the file from Trash."),
+        ("Duplicate an image", "Select one or more images and click the toolbar's Duplicate button (or Edit > Duplicate, ⌘D). Each copy is added right next to the original, named with a \"-copy\" suffix — handy for trying a few different crops of the same image."),
+        ("Crop an image", "Double-click it, or select it and click the toolbar's Crop button (or Edit > Crop), to open the crop tool. \"Apply\" saves the crop on the canvas without touching the file. \"Apply & Export\" also writes a cropped copy into the canvas folder, named with a \"-crop\" suffix."),
+        ("Delete an image", "Select it and press Delete (or the toolbar's Delete button, or Edit > Delete) to remove it from the canvas — the file stays in the folder and won't be re-added automatically; drag it back onto the canvas to bring it back. Press ⌘-Delete instead to also move the file to Trash."),
     ]
 
     private let detailsTips: [(title: String, detail: String)] = [
@@ -43,7 +44,7 @@ struct AboutView: View {
     ]
 
     private let exportingTips: [(title: String, detail: String)] = [
-        ("Rename images", "Use the rename panel to number files in their canvas reading order."),
+        ("Rename images", "Use the rename panel (toolbar, or Edit > Bulk Rename…) to number files in their canvas reading order. \"Copy and Rename in a Different Folder…\" instead copies the files with their new names into a folder you choose, leaving the originals untouched."),
         ("Refresh", "Use the Refresh button in the toolbar to re-read the folder and re-flow every image into a fresh grid, resizing the canvas to fit — handy after deleting several images to regroup what's left."),
         ("Export", "Use \"Save Visible Area\" or \"Save Whole Canvas\" to export a flattened image. Choose PNG or JPEG with the format control in the save panel."),
     ]

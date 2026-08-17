@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct RenamePanelView: View {
     @ObservedObject var document: CanvasDocument
@@ -61,17 +62,19 @@ struct RenamePanelView: View {
             .frame(minHeight: 200, maxHeight: 320)
 
             HStack {
-                Spacer()
                 Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.cancelAction)
-                Button("Apply") { applyRename() }
+                Spacer()
+                Button("Copy and Rename in a Different Folder…") { copyAndRenameToNewFolder() }
+                    .disabled(orderedItems.isEmpty)
+                Button("Rename Original Files") { applyRename() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(orderedItems.isEmpty)
             }
         }
         .padding(24)
-        .frame(width: 520, height: 560)
-        .alert("Some Files Couldn't Be Renamed", isPresented: Binding(
+        .frame(width: 640, height: 560)
+        .alert("Some Files Couldn't Be Processed", isPresented: Binding(
             get: { renameError != nil },
             set: { isPresented in if !isPresented { renameError = nil } }
         ), presenting: renameError) { _ in
@@ -139,6 +142,40 @@ struct RenamePanelView: View {
         document.save()
         if failures > 0 {
             renameError = "\(failures) file\(failures == 1 ? "" : "s") couldn't be renamed and kept its original name. The rest were renamed successfully."
+        } else {
+            isPresented = false
+        }
+    }
+
+    /// Copies each file to a chosen destination folder under its planned new
+    /// name, instead of renaming in place — the originals and the canvas
+    /// are left completely untouched, so there's nothing to undo here.
+    private func copyAndRenameToNewFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let destFolder = panel.url else { return }
+
+        let plan = plannedNames
+        let fm = FileManager.default
+        let sourceFolder = document.folderURL
+        var failures = 0
+
+        for pair in plan {
+            let from = sourceFolder.appendingPathComponent(pair.item.filename)
+            let finalName = ImageFileSupport.availableFilename(for: pair.newName, in: destFolder)
+            let to = destFolder.appendingPathComponent(finalName)
+            do {
+                try fm.copyItem(at: from, to: to)
+            } catch {
+                failures += 1
+            }
+        }
+
+        if failures > 0 {
+            renameError = "\(failures) file\(failures == 1 ? "" : "s") couldn't be copied. The rest were copied successfully."
         } else {
             isPresented = false
         }

@@ -87,4 +87,21 @@ enum ImageFileSupport {
         }
         return candidate
     }
+
+    /// Finds a filename for a duplicate of `original` in `folder`, appending
+    /// "-copy", then "-copy-2", "-copy-3", etc. before the extension —
+    /// distinct suffix style from `availableFilename` since a duplicate is a
+    /// deliberate new file, not just a naming collision to avoid.
+    static func duplicateFilename(for original: String, in folder: URL) -> String {
+        let fm = FileManager.default
+        let base = (original as NSString).deletingPathExtension
+        let ext = (original as NSString).pathExtension
+        var candidate = ext.isEmpty ? "\(base)-copy" : "\(base)-copy.\(ext)"
+        var counter = 2
+        while fm.fileExists(atPath: folder.appendingPathComponent(candidate).path) {
+            candidate = ext.isEmpty ? "\(base)-copy-\(counter)" : "\(base)-copy-\(counter).\(ext)"
+            counter += 1
+        }
+        return candidate
+    }
 }
