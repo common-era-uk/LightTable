@@ -57,7 +57,11 @@ struct CanvasLayout: Codable {
 
 @MainActor
 final class CanvasDocument: ObservableObject {
-    let folderURL: URL
+    /// The `.lt` file itself — this, not the folder, is the document's real
+    /// identity. Multiple `.lt` files (independent canvases, each with their
+    /// own items/layout) can share the same folder of images.
+    let ltFileURL: URL
+    var folderURL: URL { ltFileURL.deletingLastPathComponent() }
     @Published var items: [CanvasItem] = []
     @Published var selectedIDs: Set<UUID> = []
     @Published var canvasWidth: Double = 1600
@@ -94,9 +98,11 @@ final class CanvasDocument: ObservableObject {
     static let minCanvasDimension: Double = 800
     static let maxCanvasDimension: Double = 6000
 
-    private var sidecarURL: URL {
-        folderURL.appendingPathComponent(".lighttable.json")
-    }
+    /// Filename extension for a canvas document.
+    static let fileExtension = "lt"
+    /// The legacy hidden sidecar name, from before `.lt` files existed —
+    /// still checked for and migrated when found. See `migrateLegacySidecar`.
+    static let legacySidecarName = ".lighttable.json"
 
     // MARK: - Undo
 
@@ -143,10 +149,20 @@ final class CanvasDocument: ObservableObject {
         registerUndo(captureSnapshot(), actionName: actionName, extraUndo: extraUndo)
     }
 
-    init(folderURL: URL) {
-        self.folderURL = folderURL
+    init(ltFileURL: URL) {
+        self.ltFileURL = ltFileURL
         loadAndReconcile()
-        RecentFoldersStore.shared.record(folderURL)
+        RecentDocumentsStore.shared.record(ltFileURL)
+    }
+
+    /// Copies a legacy hidden `.lighttable.json`'s content into a new
+    /// visible `.lt` file at `destinationURL` (same schema, just relocated
+    /// and renamed) and removes the old file. Static since it runs during
+    /// folder resolution, before a `CanvasDocument` exists.
+    static func migrateLegacySidecar(from legacyURL: URL, to destinationURL: URL) throws {
+        let data = try Data(contentsOf: legacyURL)
+        try data.write(to: destinationURL, options: .atomic)
+        try? FileManager.default.removeItem(at: legacyURL)
     }
 
     // MARK: - Load / import / reconcile
@@ -161,7 +177,7 @@ final class CanvasDocument: ObservableObject {
     /// "file deleted, new file appeared" and loses its position/size/crop.
     func loadAndReconcile() {
         var existing: [CanvasItem] = []
-        if let data = try? Data(contentsOf: sidecarURL),
+        if let data = try? Data(contentsOf: ltFileURL),
            let layout = try? JSONDecoder().decode(CanvasLayout.self, from: data) {
             existing = layout.items
             canvasWidth = min(max(layout.canvasWidth ?? canvasWidth, Self.minCanvasDimension), Self.maxCanvasDimension)
@@ -326,7 +342,7 @@ final class CanvasDocument: ObservableObject {
             guideColor: guideColor
         )
         guard let data = try? JSONEncoder().encode(layout) else { return }
-        try? data.write(to: sidecarURL, options: .atomic)
+        try? data.write(to: ltFileURL, options: .atomic)
     }
 
     // MARK: - Mutations

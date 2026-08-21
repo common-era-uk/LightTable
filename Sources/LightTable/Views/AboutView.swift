@@ -17,10 +17,10 @@ struct AboutView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
-    private let intro = "LightTable is a visual tool for working with folders of images. Use it to edit, sequence, re-order, make moodboards or just to compare images and play. Start by opening a folder full of images (low res is best). LightTable will create a canvas with all images in the folder laid out in a grid. Alternatively, open an empty folder and drag images onto the canvas – they will be automatically copied to the folder as well. From here you can move, resize, preview, crop and delete images."
+    private let intro = "LightTable is a visual tool for working with folders of images. Use it to edit, sequence, re-order, make moodboards or just to compare images and play. Start by opening a folder full of images (low res is best). LightTable will create a canvas — saved as a visible .lt file right in that folder — with all images laid out in a grid. Alternatively, open an empty folder and drag images onto the canvas – they will be automatically copied to the folder as well. From here you can move, resize, preview, crop and delete images."
 
     private let gettingStartedLeft: [(title: String, detail: String)] = [
-        ("Open a folder", "Choose a folder full of images, or drag one onto the LightTable Dock icon. To start a blank LightTable, create or open an empty folder. When you drag images onto your LightTable, they're automatically copied into the folder."),
+        ("Open a folder", "Choose a folder full of images, or drag one onto the LightTable Dock icon. If the folder already has a canvas (a .lt file), it opens automatically — or you'll be asked to name a new one, or pick between several if there's more than one. When you drag images onto your LightTable, they're automatically copied into the folder."),
         ("Pan the canvas", "Scroll or swipe with two fingers on the trackpad. You can also hold Space and click-drag anywhere on the canvas to pan it the same way."),
         ("Zoom in / out", "Hold ⌘ and scroll, or use the + / − buttons in the toolbar."),
         ("Move an image", "Click and drag it. Drag on empty canvas to select multiple. With one or more selected, the arrow keys nudge them by 1pt — hold Shift for 10pt."),
@@ -41,6 +41,7 @@ struct AboutView: View {
         ("Shadows", "Use View > Toggle Shadows to turn image drop shadows on or off, and View > Shadow Settings… to adjust their distance, angle, blur, and opacity. This applies across the whole app, not just one folder."),
         ("Large preview background", "Use View > Large Preview Background Settings… to set the color and opacity behind a large image preview, plus whether its filename label shows and what color it is."),
         ("Guides", "Drag in from the top or left edge to place a guide line. Click one to select it (Delete removes it), or drag it to reposition — drag it back to the edge to remove it. Images snap to guides when moved or resized nearby. Toggle the \"Guides\" toolbar button (or View > Toggle Guides) to hide them and their ruler strips; change their color with View > Change Guide Color."),
+        ("Canvas files (.lt)", "Each folder can hold one or more .lt canvas files — visible, double-clickable documents storing your layout, crops, and guides. Use File > Save As… to save a copy of the current canvas under a new name in the same folder, handy for trying a different sequence or arrangement of the same images without disturbing the original."),
     ]
 
     private let exportingTips: [(title: String, detail: String)] = [

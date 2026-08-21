@@ -2,6 +2,14 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.0.8 — 2026-08-21
+
+- Replaced the hidden `.lighttable.json` sidecar with a visible, double-clickable `.lt` canvas file — a real document you can see and rename in Finder, registered so double-clicking one opens LightTable directly at that canvas.
+- A folder can now hold more than one `.lt` canvas. Opening a folder with exactly one canvas opens it directly as before; a folder with several prompts you to choose between them (or create a new one); an empty folder prompts you to name your first canvas.
+- Existing folders using the old hidden format are migrated automatically the first time they're opened — you're asked to name the new visible `.lt` file, then the old hidden file is removed.
+- Added File > "Save As…" (⇧⌘S) — saves a copy of the current canvas under a new name in the same folder (the images themselves are shared, not duplicated), and switches the window to editing that copy. Useful for trying a different sequence or arrangement of the same images without disturbing the original.
+- "Open Recent" now tracks specific canvases rather than folders, so it reopens exactly the one you were last working in.
+
 ## 1.0.7 — 2026-08-17
 
 - Added a Crop toolbar button (next to Delete) and Edit > Crop — both open the crop tool for the selected image, same as double-clicking it.

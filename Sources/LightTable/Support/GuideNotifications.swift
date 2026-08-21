@@ -15,4 +15,5 @@ extension Notification.Name {
     static let selectAllItems = Notification.Name("LightTable.selectAllItems")
     static let bulkRename = Notification.Name("LightTable.bulkRename")
     static let refreshAndReflow = Notification.Name("LightTable.refreshAndReflow")
+    static let saveDocumentAs = Notification.Name("LightTable.saveDocumentAs")
 }

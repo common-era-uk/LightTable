@@ -5,14 +5,14 @@ import Sparkle
 struct LightTableApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
-    @ObservedObject private var recentFolders = RecentFoldersStore.shared
+    @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
     @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     var body: some Scene {
-        WindowGroup(for: URL.self) { $folderURL in
-            RootView(folderURL: $folderURL)
+        WindowGroup(for: URL.self) { $requestedURL in
+            RootView(requestedURL: $requestedURL)
         }
         .defaultSize(width: 1200, height: 800)
         .commands {
@@ -46,20 +46,26 @@ struct LightTableApp: App {
             }
             CommandGroup(after: .newItem) {
                 Menu("Open Recent") {
-                    if recentFolders.urls.isEmpty {
-                        Text("No Recent Folders")
+                    if recentDocuments.urls.isEmpty {
+                        Text("No Recent Documents")
                     } else {
-                        ForEach(recentFolders.urls, id: \.self) { url in
-                            Button(url.lastPathComponent) {
+                        ForEach(recentDocuments.urls, id: \.self) { url in
+                            Button(url.deletingPathExtension().lastPathComponent) {
                                 openWindow(value: url)
                             }
                         }
                         Divider()
                         Button("Clear Menu") {
-                            recentFolders.clear()
+                            recentDocuments.clear()
                         }
                     }
                 }
+            }
+            CommandGroup(after: .saveItem) {
+                Button("Save As…") {
+                    NotificationCenter.default.post(name: .saveDocumentAs, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
             }
             CommandGroup(after: .toolbar) {
                 Divider()

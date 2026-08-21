@@ -1,15 +1,15 @@
 import Foundation
 
-/// Tracks recently opened canvas folders for the File > Open Recent menu,
-/// persisted across launches via UserDefaults. Not sandboxed, so plain paths
-/// are enough — no security-scoped bookmarks needed.
+/// Tracks recently opened `.lt` canvas documents for the File > Open Recent
+/// menu, persisted across launches via UserDefaults. Not sandboxed, so plain
+/// paths are enough — no security-scoped bookmarks needed.
 @MainActor
-final class RecentFoldersStore: ObservableObject {
-    static let shared = RecentFoldersStore()
+final class RecentDocumentsStore: ObservableObject {
+    static let shared = RecentDocumentsStore()
 
     @Published private(set) var urls: [URL] = []
 
-    private let defaultsKey = "recentFolders"
+    private let defaultsKey = "recentDocuments"
     private let maxCount = 10
 
     private init() {

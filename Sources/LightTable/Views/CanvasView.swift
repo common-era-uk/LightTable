@@ -206,7 +206,7 @@ struct CanvasView: View {
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
         }
-        .navigationTitle(document.folderURL.lastPathComponent)
+        .navigationTitle(document.ltFileURL.deletingPathExtension().lastPathComponent)
         .toolbar {
             ToolbarItemGroup {
                 Text("\(Int(zoom * 100))%")
@@ -324,7 +324,7 @@ struct CanvasView: View {
             // hostWindow may already be set by the time this fires, or may
             // only arrive later via WindowAccessor's async assignment — the
             // onChange below covers that second case.
-            hostWindow?.representedURL = document.folderURL
+            hostWindow?.representedURL = document.ltFileURL
         }
         .onDisappear {
             removeKeyMonitor()
@@ -334,8 +334,8 @@ struct CanvasView: View {
         .onChange(of: hostWindow) { _, newWindow in
             // Setting this gives the window a proxy icon and lets the user
             // ⌘-click (or right-click the proxy icon) the title bar to see
-            // the folder's full path, exactly like Finder/any document window.
-            newWindow?.representedURL = document.folderURL
+            // the .lt file's full path, exactly like any document window.
+            newWindow?.representedURL = document.ltFileURL
         }
         .sheet(isPresented: cropSheetBinding) {
             if let id = cropModeItemID {
@@ -693,7 +693,7 @@ struct CanvasView: View {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         let suffix = cropToVisible ? " (visible)" : ""
-        let baseName = "\(document.folderURL.lastPathComponent)\(suffix)"
+        let baseName = "\(document.ltFileURL.deletingPathExtension().lastPathComponent)\(suffix)"
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "\(baseName).png"
         let formatCoordinator = ExportFormatCoordinator(panel: panel, baseName: baseName)

@@ -2,8 +2,14 @@ import SwiftUI
 import AppKit
 
 struct RootView: View {
-    @Binding var folderURL: URL?
+    /// Either a folder (resolved below to a specific `.lt` file) or a `.lt`
+    /// file itself, already unambiguous — a Finder double-click or an
+    /// "Open Recent" selection hands over a `.lt` URL directly, while
+    /// "Open Folder…" and Dock/Finder folder drops hand over a directory.
+    @Binding var requestedURL: URL?
     @State private var document: CanvasDocument?
+    @State private var pendingResolution: PendingResolution?
+    @State private var showSaveAsSheet = false
     @State private var hostWindow: NSWindow?
     @State private var openFolderError: String?
     @State private var instanceID = UUID()
@@ -28,9 +34,31 @@ struct RootView: View {
         } message: { message in
             Text(message)
         }
+        .sheet(item: $pendingResolution) { resolution in
+            DocumentResolutionSheet(resolution: resolution) { ltFileURL in
+                openDocument(at: ltFileURL)
+            } onCancel: {
+                pendingResolution = nil
+                requestedURL = nil
+            }
+        }
+        .sheet(isPresented: $showSaveAsSheet) {
+            if let document {
+                SaveAsSheet(currentName: document.ltFileURL.deletingPathExtension().lastPathComponent) { name in
+                    showSaveAsSheet = false
+                    performSaveAs(name: name)
+                } onCancel: {
+                    showSaveAsSheet = false
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .saveDocumentAs)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow, document != nil else { return }
+            showSaveAsSheet = true
+        }
         .onAppear {
-            if folderURL == nil, AppDelegate.suppressNextBlankWindow {
-                // A folder window was already opened for this same drop;
+            if requestedURL == nil, AppDelegate.suppressNextBlankWindow {
+                // A document window was already opened for this same drop;
                 // this blank window is just a same-launch side effect of
                 // that, not something the user asked for — close it.
                 dismissWindow()
@@ -44,39 +72,108 @@ struct RootView: View {
             // Any window's environment action works here — it's routed by
             // SwiftUI to the right WindowGroup regardless of which window
             // set it, so the AppDelegate always has a live one to call.
-            AppDelegate.openFolderAction = { url in openWindow(value: url) }
-            if folderURL == nil {
+            AppDelegate.openDocumentAction = { url in openWindow(value: url) }
+            if requestedURL == nil {
                 AppDelegate.dismissBlankWindow = { dismissWindow() }
             }
         }
-        .onChange(of: folderURL) { _, _ in syncDocument() }
+        .onChange(of: requestedURL) { _, _ in syncDocument() }
     }
 
     private func syncDocument() {
-        guard let folderURL else {
+        guard let requestedURL else {
             document = nil
-            // Register as blank so that if a folder opens somewhere else
+            pendingResolution = nil
+            // Register as blank so that if a document opens somewhere else
             // (toolbar button, Open Recent, Dock drop) while this window is
             // just sitting on the "open a folder" prompt, it gets closed
             // instead of lingering as a leftover tab/window.
             BlankWindowRegistry.shared.register(instanceID) { [dismissWindow] in dismissWindow() }
             return
         }
-        if document?.folderURL != folderURL {
-            if let error = ImageFileSupport.oversizeError(inFolder: folderURL) {
-                document = nil
-                openFolderError = error
-                // Deferred: this runs from folderURL's own onChange, so
-                // resetting it synchronously here would mutate the binding
-                // mid-update.
-                DispatchQueue.main.async { self.folderURL = nil }
-                return
-            }
-            document = CanvasDocument(folderURL: folderURL)
-            document?.undoManager = undoManager
+        if requestedURL.hasDirectoryPath {
+            resolveFolder(requestedURL)
+        } else {
+            openDocument(at: requestedURL)
+        }
+    }
+
+    /// A folder isn't itself a document — it may hold zero, one, or several
+    /// `.lt` canvases. One match opens directly; anything else (including a
+    /// legacy hidden sidecar needing migration) is handled by a sheet.
+    private func resolveFolder(_ folderURL: URL) {
+        guard document?.folderURL != folderURL else { return }
+
+        let ltFiles = ((try? FileManager.default.contentsOfDirectory(
+            at: folderURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )) ?? [])
+            .filter { $0.pathExtension.lowercased() == CanvasDocument.fileExtension }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+
+        if ltFiles.count == 1 {
+            openDocument(at: ltFiles[0])
+            return
+        }
+
+        BlankWindowRegistry.shared.register(instanceID) { [dismissWindow] in dismissWindow() }
+
+        let legacyURL = folderURL.appendingPathComponent(CanvasDocument.legacySidecarName)
+        let hasLegacy = FileManager.default.fileExists(atPath: legacyURL.path)
+        pendingResolution = PendingResolution(
+            folderURL: folderURL,
+            existingLTFiles: ltFiles,
+            legacyJSONURL: hasLegacy ? legacyURL : nil
+        )
+    }
+
+    private func openDocument(at ltFileURL: URL) {
+        pendingResolution = nil
+        guard document?.ltFileURL != ltFileURL else {
+            BlankWindowRegistry.shared.unregister(instanceID)
+            BlankWindowRegistry.shared.dismissOthers(except: instanceID)
+            return
+        }
+        if let error = ImageFileSupport.oversizeError(inFolder: ltFileURL.deletingLastPathComponent()) {
+            document = nil
+            openFolderError = error
+            // Deferred: this can run from requestedURL's own onChange, so
+            // resetting it synchronously here would mutate the binding
+            // mid-update.
+            DispatchQueue.main.async { self.requestedURL = nil }
+            return
+        }
+
+        // Undo steps registered against whatever document was previously
+        // open (if any) no longer target anything meaningful once it's
+        // swapped out — e.g. after Save As switches this window to the new
+        // copy — so they'd otherwise sit inert in the Edit menu.
+        undoManager?.removeAllActions()
+
+        document = CanvasDocument(ltFileURL: ltFileURL)
+        document?.undoManager = undoManager
+        if requestedURL != ltFileURL {
+            requestedURL = ltFileURL
         }
         BlankWindowRegistry.shared.unregister(instanceID)
         BlankWindowRegistry.shared.dismissOthers(except: instanceID)
+    }
+
+    /// Writes a copy of the current document's `.lt` file under a new name
+    /// in the same folder, then switches this window over to editing that
+    /// copy — the images themselves are shared, not duplicated.
+    private func performSaveAs(name: String) {
+        guard let document else { return }
+        let sanitized = name
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        guard !sanitized.isEmpty else { return }
+
+        let desiredName = "\(sanitized).\(CanvasDocument.fileExtension)"
+        let finalName = ImageFileSupport.availableFilename(for: desiredName, in: document.folderURL)
+        let destinationURL = document.folderURL.appendingPathComponent(finalName)
+
+        guard (try? FileManager.default.copyItem(at: document.ltFileURL, to: destinationURL)) != nil else { return }
+        openDocument(at: destinationURL)
     }
 
     private var openFolderPrompt: some View {
@@ -106,7 +203,7 @@ struct RootView: View {
 
     private func chooseFolder() {
         if let url = pickFolder() {
-            folderURL = url
+            requestedURL = url
         }
     }
 
