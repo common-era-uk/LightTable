@@ -2,6 +2,13 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.0.9 — 2026-08-22
+
+- Added image layering: Edit > "Bring Forward" (⌘]), "Bring to Front" (⇧⌘]), "Send Backward" (⌘[), and "Send to Back" (⇧⌘[) reorder the selected image(s) above or below the cards around them.
+- Added a right-click menu on image cards: Crop, Duplicate, Remove from Canvas, Delete from Folder, and the four layering commands. Right-clicking a card that isn't already selected acts on just that card; right-clicking a card that's part of a multi-selection acts on the whole selection.
+- Reworked the Edit menu: Select All now sits above Duplicate; "Delete" is split into "Remove from Canvas" (keeps the file, same as before) and a new "Delete from Folder" (moves the file to Trash, same as the old ⌘-Delete); Cut/Copy/Paste (which never did anything) stay removed.
+- Reworked the File menu: added "Open…" (⌘O) after New Window, moved "Bulk Rename…" here from the Edit menu (alongside Save As… and Package…), and moved "Close"/"Close All" down to the bottom of the menu instead of sitting right after Open Recent.
+
 ## 1.0.8 — 2026-08-21
 
 - Replaced the hidden `.lighttable.json` sidecar with a visible, double-clickable `.lt` canvas file — a real document you can see and rename in Finder, registered so double-clicking one opens LightTable directly at that canvas.
@@ -9,6 +16,7 @@ All notable changes to LightTable are tracked here, most recent first.
 - Existing folders using the old hidden format are migrated automatically the first time they're opened — you're asked to name the new visible `.lt` file, then the old hidden file is removed.
 - Added File > "Save As…" (⇧⌘S) — saves a copy of the current canvas under a new name in the same folder (the images themselves are shared, not duplicated), and switches the window to editing that copy. Useful for trying a different sequence or arrangement of the same images without disturbing the original.
 - "Open Recent" now tracks specific canvases rather than folders, so it reopens exactly the one you were last working in.
+- Added File > "Package…" — bundles the current canvas (the `.lt` file plus every image it actually uses) into a standalone `.zip`, for sharing outside of whatever's keeping the folder in sync (Dropbox, etc.) between people who already have access to it.
 
 ## 1.0.7 — 2026-08-17
 

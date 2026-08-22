@@ -16,4 +16,10 @@ extension Notification.Name {
     static let bulkRename = Notification.Name("LightTable.bulkRename")
     static let refreshAndReflow = Notification.Name("LightTable.refreshAndReflow")
     static let saveDocumentAs = Notification.Name("LightTable.saveDocumentAs")
+    static let packageDocument = Notification.Name("LightTable.packageDocument")
+    static let deleteFromFolder = Notification.Name("LightTable.deleteFromFolder")
+    static let bringForward = Notification.Name("LightTable.bringForward")
+    static let bringToFront = Notification.Name("LightTable.bringToFront")
+    static let sendBackward = Notification.Name("LightTable.sendBackward")
+    static let sendToBack = Notification.Name("LightTable.sendToBack")
 }

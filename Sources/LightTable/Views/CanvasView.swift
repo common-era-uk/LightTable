@@ -291,29 +291,13 @@ struct CanvasView: View {
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             showGuideColorPanel()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .cropSelected)) { _ in
-            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
-            if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
-                cropModeItemID = id
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .deleteSelected)) { _ in
-            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
-            performDelete()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .duplicateSelected)) { _ in
-            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
-            document.duplicateItems(document.selectedIDs)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .selectAllItems)) { _ in
-            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
-            document.selectedIDs = Set(document.items.map(\.id))
-            document.selectedGuideID = nil
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .bulkRename)) { _ in
-            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
-            showRenameSheet = true
-        }
+        .modifier(EditMenuCommands(
+            document: document,
+            hostWindow: hostWindow,
+            cropModeItemID: $cropModeItemID,
+            showRenameSheet: $showRenameSheet,
+            performDelete: performDelete
+        ))
         .onReceive(NotificationCenter.default.publisher(for: .refreshAndReflow)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             document.refreshFromDisk()
@@ -961,5 +945,70 @@ private final class ExportFormatCoordinator: NSObject {
         let format = ExportImageFormat.allCases[sender.indexOfSelectedItem]
         panel.allowedContentTypes = [format.contentType]
         panel.nameFieldStringValue = "\(baseName).\(format.fileExtension)"
+    }
+}
+
+/// Bundles the Edit-menu-triggered notification handlers (crop, delete
+/// variants, layering, duplicate, select all, bulk rename) into their own
+/// `ViewModifier` rather than another decade of chained `.onReceive` calls
+/// directly on `CanvasView.body` — past a certain number of chained
+/// modifiers on one expression, the type checker times out trying to infer
+/// the whole thing at once.
+private struct EditMenuCommands: ViewModifier {
+    let document: CanvasDocument
+    let hostWindow: NSWindow?
+    @Binding var cropModeItemID: UUID?
+    @Binding var showRenameSheet: Bool
+    let performDelete: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .cropSelected)) { _ in
+                guard isKeyWindow else { return }
+                if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
+                    cropModeItemID = id
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .deleteSelected)) { _ in
+                guard isKeyWindow else { return }
+                performDelete()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .deleteFromFolder)) { _ in
+                guard isKeyWindow else { return }
+                document.deleteItems(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .bringForward)) { _ in
+                guard isKeyWindow else { return }
+                document.bringForward(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .bringToFront)) { _ in
+                guard isKeyWindow else { return }
+                document.bringToFront(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sendBackward)) { _ in
+                guard isKeyWindow else { return }
+                document.sendBackward(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .sendToBack)) { _ in
+                guard isKeyWindow else { return }
+                document.sendToBack(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .duplicateSelected)) { _ in
+                guard isKeyWindow else { return }
+                document.duplicateItems(document.selectedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .selectAllItems)) { _ in
+                guard isKeyWindow else { return }
+                document.selectedIDs = Set(document.items.map(\.id))
+                document.selectedGuideID = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .bulkRename)) { _ in
+                guard isKeyWindow else { return }
+                showRenameSheet = true
+            }
+    }
+
+    private var isKeyWindow: Bool {
+        hostWindow != nil && hostWindow === NSApp.keyWindow
     }
 }

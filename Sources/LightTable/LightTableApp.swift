@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import Sparkle
 
 @main
@@ -25,6 +26,10 @@ struct LightTableApp: App {
                 }
             }
             CommandGroup(replacing: .pasteboard) {
+                Button("Select All") {
+                    NotificationCenter.default.post(name: .selectAllItems, object: nil)
+                }
+                .keyboardShortcut("a", modifiers: .command)
                 Button("Duplicate") {
                     NotificationCenter.default.post(name: .duplicateSelected, object: nil)
                 }
@@ -32,19 +37,35 @@ struct LightTableApp: App {
                 Button("Crop") {
                     NotificationCenter.default.post(name: .cropSelected, object: nil)
                 }
-                Button("Delete") {
+                Button("Remove from Canvas") {
                     NotificationCenter.default.post(name: .deleteSelected, object: nil)
                 }
+                Button("Delete from Folder") {
+                    NotificationCenter.default.post(name: .deleteFromFolder, object: nil)
+                }
                 Divider()
-                Button("Select All") {
-                    NotificationCenter.default.post(name: .selectAllItems, object: nil)
+                Button("Bring Forward") {
+                    NotificationCenter.default.post(name: .bringForward, object: nil)
                 }
-                .keyboardShortcut("a", modifiers: .command)
-                Button("Bulk Rename…") {
-                    NotificationCenter.default.post(name: .bulkRename, object: nil)
+                .keyboardShortcut("]", modifiers: .command)
+                Button("Bring to Front") {
+                    NotificationCenter.default.post(name: .bringToFront, object: nil)
                 }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+                Button("Send Backward") {
+                    NotificationCenter.default.post(name: .sendBackward, object: nil)
+                }
+                .keyboardShortcut("[", modifiers: .command)
+                Button("Send to Back") {
+                    NotificationCenter.default.post(name: .sendToBack, object: nil)
+                }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
             }
             CommandGroup(after: .newItem) {
+                Button("Open…") {
+                    presentOpenPanel()
+                }
+                .keyboardShortcut("o", modifiers: .command)
                 Menu("Open Recent") {
                     if recentDocuments.urls.isEmpty {
                         Text("No Recent Documents")
@@ -61,11 +82,34 @@ struct LightTableApp: App {
                     }
                 }
             }
-            CommandGroup(after: .saveItem) {
+            // Replaces (rather than adds after) .saveItem — its default
+            // content is where "Close"/"Close All" are automatically
+            // supplied from, and there's no separate placement to target
+            // just those. Rebuilding the whole group here is what lets them
+            // move to the bottom of the menu instead of their default spot
+            // right after Open Recent.
+            CommandGroup(replacing: .saveItem) {
+                Button("Bulk Rename…") {
+                    NotificationCenter.default.post(name: .bulkRename, object: nil)
+                }
                 Button("Save As…") {
                     NotificationCenter.default.post(name: .saveDocumentAs, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Package…") {
+                    NotificationCenter.default.post(name: .packageDocument, object: nil)
+                }
+                Divider()
+                Button("Close") {
+                    NSApp.keyWindow?.performClose(nil)
+                }
+                .keyboardShortcut("w", modifiers: .command)
+                Button("Close All") {
+                    for window in NSApp.windows where window.isVisible {
+                        window.performClose(nil)
+                    }
+                }
+                .keyboardShortcut("w", modifiers: [.command, .option])
             }
             CommandGroup(after: .toolbar) {
                 Divider()
@@ -116,5 +160,20 @@ struct LightTableApp: App {
             PreviewBackgroundSettingsView()
         }
         .windowResizability(.contentSize)
+    }
+
+    /// File > Open… — always opens in a new window (matching "New Window"
+    /// and the toolbar's own "Open Folder…" button) rather than replacing
+    /// whatever's in the frontmost window, so it can never look like it
+    /// just discarded an already-open canvas.
+    private func presentOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openWindow(value: url)
     }
 }

@@ -43,6 +43,40 @@ struct ImageCardView: View {
                     .gesture(moveGesture)
                     .onTapGesture(count: 2) { cropModeItemID = itemID }
                     .onTapGesture { selectOnTap() }
+                    .contextMenu {
+                        Button("Crop") {
+                            let targets = contextMenuTargets()
+                            if targets.count == 1, let id = targets.first {
+                                cropModeItemID = id
+                            }
+                        }
+                        Button("Duplicate") {
+                            document.duplicateItems(contextMenuTargets())
+                        }
+                        Button("Remove from Canvas") {
+                            document.removeFromCanvas(contextMenuTargets())
+                        }
+                        Button("Delete from Folder") {
+                            document.deleteItems(contextMenuTargets())
+                        }
+                        Divider()
+                        Button("Bring Forward") {
+                            document.bringForward(contextMenuTargets())
+                        }
+                        .keyboardShortcut("]", modifiers: .command)
+                        Button("Bring to Front") {
+                            document.bringToFront(contextMenuTargets())
+                        }
+                        .keyboardShortcut("]", modifiers: [.command, .shift])
+                        Button("Send Backward") {
+                            document.sendBackward(contextMenuTargets())
+                        }
+                        .keyboardShortcut("[", modifiers: .command)
+                        Button("Send to Back") {
+                            document.sendToBack(contextMenuTargets())
+                        }
+                        .keyboardShortcut("[", modifiers: [.command, .shift])
+                    }
 
                 if isSelected {
                     ForEach(CardCorner.allCases, id: \.self) { corner in
@@ -119,6 +153,20 @@ struct ImageCardView: View {
         } else {
             document.selectedIDs = [itemID]
         }
+    }
+
+    /// What a context-menu action should act on: the whole current
+    /// selection if this card is already part of it (right-clicking a
+    /// member of a multi-selection acts on the group, same as Finder),
+    /// otherwise just this card — selecting it first, so the result matches
+    /// what's visibly highlighted once the menu closes.
+    private func contextMenuTargets() -> Set<UUID> {
+        if document.selectedIDs.contains(itemID) {
+            return document.selectedIDs
+        }
+        document.selectedGuideID = nil
+        document.selectedIDs = [itemID]
+        return [itemID]
     }
 
     /// Dragging a card that's part of the current selection moves the whole

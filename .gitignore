@@ -6,3 +6,4 @@ LightTable.zip
 releases/
 Packaging/sparkle-tools/
 LightTable-notarize.zip
+.claude/settings.local.json

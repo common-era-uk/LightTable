@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct RootView: View {
     /// Either a folder (resolved below to a specific `.lt` file) or a `.lt`
@@ -12,6 +13,7 @@ struct RootView: View {
     @State private var showSaveAsSheet = false
     @State private var hostWindow: NSWindow?
     @State private var openFolderError: String?
+    @State private var packageError: String?
     @State private var instanceID = UUID()
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
@@ -31,6 +33,14 @@ struct RootView: View {
             set: { isPresented in if !isPresented { openFolderError = nil } }
         ), presenting: openFolderError) { _ in
             Button("OK") { openFolderError = nil }
+        } message: { message in
+            Text(message)
+        }
+        .alert("Can't Create Package", isPresented: Binding(
+            get: { packageError != nil },
+            set: { isPresented in if !isPresented { packageError = nil } }
+        ), presenting: packageError) { _ in
+            Button("OK") { packageError = nil }
         } message: { message in
             Text(message)
         }
@@ -55,6 +65,10 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .saveDocumentAs)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow, document != nil else { return }
             showSaveAsSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .packageDocument)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow, let document else { return }
+            presentPackagePanel(for: document)
         }
         .onAppear {
             if requestedURL == nil, AppDelegate.suppressNextBlankWindow {
@@ -174,6 +188,25 @@ struct RootView: View {
 
         guard (try? FileManager.default.copyItem(at: document.ltFileURL, to: destinationURL)) != nil else { return }
         openDocument(at: destinationURL)
+    }
+
+    /// Lets the user pick any destination (unlike Save As or Rename, this
+    /// one's meant to leave the synced folder entirely) and bundles the
+    /// document into a standalone, shareable zip there.
+    private func presentPackagePanel(for document: CanvasDocument) {
+        let panel = NSSavePanel()
+        panel.directoryURL = document.folderURL
+        panel.nameFieldStringValue = "\(document.ltFileURL.deletingPathExtension().lastPathComponent).zip"
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+        panel.prompt = "Package"
+        guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
+
+        do {
+            try document.packageForSharing(to: destinationURL)
+        } catch {
+            packageError = error.localizedDescription
+        }
     }
 
     private var openFolderPrompt: some View {

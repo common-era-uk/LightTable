@@ -165,6 +165,43 @@ final class CanvasDocument: ObservableObject {
         try? FileManager.default.removeItem(at: legacyURL)
     }
 
+    /// Bundles this document — the `.lt` file plus every image it actually
+    /// references (not every file that happens to be in the folder) — into
+    /// a standalone `.zip` at `destinationZipURL`, self-contained enough to
+    /// share outside of whatever's keeping the original folder in sync
+    /// (Dropbox, etc.) between people who already have it.
+    func packageForSharing(to destinationZipURL: URL) throws {
+        let fm = FileManager.default
+        let packageName = destinationZipURL.deletingPathExtension().lastPathComponent
+        let stagingRoot = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let stagingDir = stagingRoot.appendingPathComponent(packageName)
+        try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: stagingRoot) }
+
+        try fm.copyItem(at: ltFileURL, to: stagingDir.appendingPathComponent(ltFileURL.lastPathComponent))
+
+        var copiedFilenames = Set<String>()
+        for item in items where !copiedFilenames.contains(item.filename) {
+            copiedFilenames.insert(item.filename)
+            let source = folderURL.appendingPathComponent(item.filename)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            try fm.copyItem(at: source, to: stagingDir.appendingPathComponent(item.filename))
+        }
+
+        if fm.fileExists(atPath: destinationZipURL.path) {
+            try fm.removeItem(at: destinationZipURL)
+        }
+
+        let ditto = Process()
+        ditto.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        ditto.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", stagingDir.path, destinationZipURL.path]
+        try ditto.run()
+        ditto.waitUntilExit()
+        guard ditto.terminationStatus == 0 else {
+            throw NSError(domain: "LightTable", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn't create the zip archive."])
+        }
+    }
+
     // MARK: - Load / import / reconcile
 
     /// Reads the sidecar layout (if any), scans the folder for images, drops
@@ -520,6 +557,64 @@ final class CanvasDocument: ObservableObject {
 
         items.append(contentsOf: newItems)
         selectedIDs = Set(newItems.map { $0.id })
+        save()
+    }
+
+    // MARK: - Layering (z-order)
+    //
+    // `items`' array order is the stacking order the canvas renders in
+    // (later entries on top), so these just reorder the array.
+
+    func bringToFront(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        registerUndoCheckpoint(actionName: "Bring to Front")
+        let selected = items.filter { ids.contains($0.id) }
+        let rest = items.filter { !ids.contains($0.id) }
+        items = rest + selected
+        save()
+    }
+
+    func sendToBack(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        registerUndoCheckpoint(actionName: "Send to Back")
+        let selected = items.filter { ids.contains($0.id) }
+        let rest = items.filter { !ids.contains($0.id) }
+        items = selected + rest
+        save()
+    }
+
+    /// Moves each selected item one step up, past its immediate unselected
+    /// neighbor above (if any) — processed top-down so a multi-item
+    /// selection each steps forward by one without leapfrogging itself.
+    func bringForward(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        registerUndoCheckpoint(actionName: "Bring Forward")
+        var result = items
+        var index = result.count - 2
+        while index >= 0 {
+            if ids.contains(result[index].id), !ids.contains(result[index + 1].id) {
+                result.swapAt(index, index + 1)
+            }
+            index -= 1
+        }
+        items = result
+        save()
+    }
+
+    /// Mirror of `bringForward`: moves each selected item one step down,
+    /// past its immediate unselected neighbor below, processed bottom-up.
+    func sendBackward(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        registerUndoCheckpoint(actionName: "Send Backward")
+        var result = items
+        var index = 1
+        while index < result.count {
+            if ids.contains(result[index].id), !ids.contains(result[index - 1].id) {
+                result.swapAt(index, index - 1)
+            }
+            index += 1
+        }
+        items = result
         save()
     }
 
