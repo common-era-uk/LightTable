@@ -33,7 +33,6 @@ struct AboutView: View {
         ("Duplicate an image", "Select one or more images and click the toolbar's Duplicate button (or Edit > Duplicate, ⌘D). Each copy is added right next to the original, named with a \"-copy\" suffix — handy for trying a few different crops of the same image."),
         ("Crop an image", "Double-click it, or select it and click the toolbar's Crop button (or Edit > Crop), to open the crop tool. \"Apply\" saves the crop on the canvas without touching the file. \"Apply & Export\" also writes a cropped copy into the canvas folder, named with a \"-crop\" suffix."),
         ("Delete an image", "Select it and press Delete (or Edit > Remove from Canvas) to take it off the canvas without touching the file — it won't be re-added automatically; drag it back onto the canvas to bring it back. Use ⌘-Delete or Edit > Delete from Folder instead to also move the file to Trash."),
-        ("Layer images", "Select one or more images and use Edit > Bring Forward / Send Backward (⌘] / ⌘[) to move them one step, or Bring to Front / Send to Back (⇧⌘] / ⇧⌘[) to move them all the way. Right-click a card for the same options, plus Crop, Duplicate, and Remove/Delete."),
     ]
 
     private let detailsTips: [(title: String, detail: String)] = [
@@ -41,8 +40,10 @@ struct AboutView: View {
         ("Canvas color", "Click the palette icon in the toolbar to pick a custom canvas background color. It's remembered per folder and used when exporting too."),
         ("Shadows", "Use View > Toggle Shadows to turn image drop shadows on or off, and View > Shadow Settings… to adjust their distance, angle, blur, and opacity. This applies across the whole app, not just one folder."),
         ("Large preview background", "Use View > Large Preview Background Settings… to set the color and opacity behind a large image preview, plus whether its filename label shows and what color it is."),
-        ("Guides", "Drag in from the top or left edge to place a guide line. Click one to select it (Delete removes it), or drag it to reposition — drag it back to the edge to remove it. Images snap to guides when moved or resized nearby. Toggle the \"Guides\" toolbar button (or View > Toggle Guides) to hide them and their ruler strips; change their color with View > Change Guide Color."),
+        ("Guides", "Drag in from the top or left edge to place a guide line. Click one to select it (Delete removes it), or drag it to reposition — drag it back to the edge to remove it. Images snap to guides when moved or resized nearby. Toggle the \"Guides\" toolbar button (or View > Toggle Guides) to hide them and their ruler strips; change their color with View > Change Guide Color, or remove them all at once with View > Clear All Guides."),
         ("Canvas files (.lt)", "Each folder can hold one or more .lt canvas files — visible, double-clickable documents storing your layout, crops, and guides. Use File > Save As… to save a copy of the current canvas under a new name in the same folder, handy for trying a different sequence or arrangement of the same images without disturbing the original."),
+        ("Layer images", "Select one or more images and use Edit > Bring Forward / Send Backward (⌘] / ⌘[) to move them one step, or Bring to Front / Send to Back (⇧⌘] / ⇧⌘[) to move them all the way. Right-click a card for the same options, plus Crop, Duplicate, and Remove/Delete."),
+        ("Create Grid", "Select two or more images and click the toolbar's Create Grid button (or View > Create Grid…) to arrange them into a clean grid. Set the spacing between images in points or as a percentage. Images already in a rough row stay together — the layout only merges or splits rows where the canvas width actually requires it, and all images are resized to a shared height."),
     ]
 
     private let exportingTips: [(title: String, detail: String)] = [

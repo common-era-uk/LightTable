@@ -662,6 +662,15 @@ final class CanvasDocument: ObservableObject {
         save()
     }
 
+    func clearAllGuides() {
+        guard !verticalGuides.isEmpty || !horizontalGuides.isEmpty else { return }
+        registerUndoCheckpoint(actionName: "Clear All Guides")
+        verticalGuides.removeAll()
+        horizontalGuides.removeAll()
+        selectedGuideID = nil
+        save()
+    }
+
     // MARK: - Reading order
 
     /// Top-to-bottom rows, left-to-right within a row, computed from current
@@ -674,6 +683,13 @@ final class CanvasDocument: ObservableObject {
     /// up/down navigation can find the item in the neighboring row closest
     /// to the current one's horizontal position.
     func readingOrderRows() -> [[CanvasItem]] {
+        Self.rowGroupedReadingOrder(items)
+    }
+
+    /// Clusters `items` into visual rows by y-proximity, then sorts each row
+    /// left-to-right — the core of reading order, factored out so it can
+    /// also be applied to an arbitrary subset (see `createGrid`).
+    private static func rowGroupedReadingOrder(_ items: [CanvasItem]) -> [[CanvasItem]] {
         guard !items.isEmpty else { return [] }
         let sortedByY = items.sorted { $0.y < $1.y }
         let avgHeight = items.reduce(0.0) { $0 + $1.height } / Double(items.count)
@@ -694,5 +710,109 @@ final class CanvasDocument: ObservableObject {
         if !currentRow.isEmpty { rows.append(currentRow) }
 
         return rows.map { row in row.sorted { $0.x < $1.x } }
+    }
+
+    // MARK: - Create Grid
+
+    private struct GridEntry {
+        let id: UUID
+        let width: Double
+    }
+
+    private static func rowWidth(_ entries: [GridEntry], gap: Double) -> Double {
+        guard !entries.isEmpty else { return 0 }
+        return entries.reduce(0.0) { $0 + $1.width } + gap * Double(entries.count - 1)
+    }
+
+    /// Re-flows the selected items into a clean, justified grid: every image
+    /// is resized to a shared height (the average of their current
+    /// heights), with each one's own width following from its existing
+    /// aspect ratio — so portrait and landscape images sit at the same
+    /// height per row instead of a uniform cell size distorting anything.
+    ///
+    /// Row membership starts from the images' *existing* rows (by current
+    /// y-position), not a from-scratch repack — an already-tidy 5-then-4
+    /// arrangement stays 5-then-4 instead of shuffling into 6-then-3 just
+    /// because there happened to be a sliver of width left over. Existing
+    /// rows only get merged into one output row when they jointly still fit
+    /// the canvas width (so a short trailing row, e.g. one straggler,
+    /// settles into the row above it rather than sitting alone), and an
+    /// existing row wider than the canvas on its own is the only case that
+    /// gets split, item by item. The grid starts at the selection's own
+    /// top-left corner, so it replaces the selected images roughly where
+    /// they already were.
+    func createGrid(_ ids: Set<UUID>, spacing: Double, isPercentage: Bool) {
+        let targets = items.filter { ids.contains($0.id) }
+        guard targets.count >= 2 else { return }
+
+        let existingRows = Self.rowGroupedReadingOrder(targets)
+        let commonHeight = targets.reduce(0.0) { $0 + $1.height } / Double(targets.count)
+        let gap = isPercentage ? commonHeight * (spacing / 100) : spacing
+
+        let originX = targets.map(\.x).min() ?? 0
+        let originY = targets.map(\.y).min() ?? 0
+        let maxRowWidth = max(canvasWidth - originX, commonHeight)
+
+        func entries(for row: [CanvasItem]) -> [GridEntry] {
+            row.map { item in
+                let aspect = item.height > 0 ? item.width / item.height : 1
+                return GridEntry(id: item.id, width: commonHeight * aspect)
+            }
+        }
+
+        var outputRows: [[GridEntry]] = []
+        var current: [GridEntry] = []
+
+        for row in existingRows {
+            let rowEntries = entries(for: row)
+            let width = Self.rowWidth(rowEntries, gap: gap)
+
+            if width > maxRowWidth {
+                // This one existing row alone doesn't fit — flush whatever
+                // was building, then wrap just this row's own items.
+                if !current.isEmpty { outputRows.append(current); current = [] }
+                for entry in rowEntries {
+                    let projected = current.isEmpty ? entry.width : Self.rowWidth(current, gap: gap) + gap + entry.width
+                    if projected > maxRowWidth, !current.isEmpty {
+                        outputRows.append(current)
+                        current = []
+                    }
+                    current.append(entry)
+                }
+                continue
+            }
+
+            let projected = current.isEmpty ? width : Self.rowWidth(current, gap: gap) + gap + width
+            if projected > maxRowWidth, !current.isEmpty {
+                outputRows.append(current)
+                current = rowEntries
+            } else {
+                current.append(contentsOf: rowEntries)
+            }
+        }
+        if !current.isEmpty { outputRows.append(current) }
+
+        registerUndoCheckpoint(actionName: "Create Grid")
+
+        var cursorY = originY
+        var maxY = originY
+        for row in outputRows {
+            var cursorX = originX
+            for entry in row {
+                updateItem(entry.id) { current in
+                    current.x = cursorX
+                    current.y = cursorY
+                    current.width = entry.width
+                    current.height = commonHeight
+                }
+                cursorX += entry.width + gap
+            }
+            cursorY += commonHeight + gap
+            maxY = cursorY - gap
+        }
+
+        canvasHeight = max(canvasHeight, maxY + 90)
+        selectedIDs = ids
+        save()
     }
 }

@@ -8,6 +8,7 @@ struct LightTableApp: App {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
     @ObservedObject private var shadowSettings = ShadowSettings.shared
+    @ObservedObject private var menuSelectionState = MenuSelectionState.shared
 
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
@@ -37,12 +38,15 @@ struct LightTableApp: App {
                 Button("Crop") {
                     NotificationCenter.default.post(name: .cropSelected, object: nil)
                 }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
                 Button("Remove from Canvas") {
                     NotificationCenter.default.post(name: .deleteSelected, object: nil)
                 }
+                .keyboardShortcut(.delete, modifiers: [])
                 Button("Delete from Folder") {
                     NotificationCenter.default.post(name: .deleteFromFolder, object: nil)
                 }
+                .keyboardShortcut(.delete, modifiers: .command)
                 Divider()
                 Button("Bring Forward") {
                     NotificationCenter.default.post(name: .bringForward, object: nil)
@@ -113,11 +117,19 @@ struct LightTableApp: App {
             }
             CommandGroup(after: .toolbar) {
                 Divider()
+                Button("Create Grid…") {
+                    NotificationCenter.default.post(name: .createGrid, object: nil)
+                }
+                .disabled(!menuSelectionState.hasMultipleSelected)
+                Divider()
                 Button("Toggle Guides") {
                     NotificationCenter.default.post(name: .toggleShowGuides, object: nil)
                 }
                 Button("Change Guide Color…") {
                     NotificationCenter.default.post(name: .openGuideColorPicker, object: nil)
+                }
+                Button("Clear All Guides") {
+                    NotificationCenter.default.post(name: .clearAllGuides, object: nil)
                 }
                 Divider()
                 Button("Toggle Shadows") {

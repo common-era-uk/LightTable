@@ -30,6 +30,7 @@ struct CanvasView: View {
 
     @State private var cropModeItemID: UUID?
     @State private var showRenameSheet = false
+    @State private var showCreateGridSheet = false
     @State private var previewItemID: UUID?
     @State private var isSpaceDown = false
     @State private var spacePanBaseline: CGSize?
@@ -66,8 +67,8 @@ struct CanvasView: View {
             acc.maxY = max(acc.maxY, item.y + item.height)
         }
         return CGSize(
-            width: max(extents.maxX + 200, document.canvasWidth),
-            height: max(extents.maxY + 200, document.canvasHeight)
+            width: max(extents.maxX + 160, document.canvasWidth),
+            height: max(extents.maxY + 160, document.canvasHeight)
         )
     }
 
@@ -237,6 +238,11 @@ struct CanvasView: View {
                 .symbolRenderingMode(.multicolor)
                 .help("Set a custom canvas background color")
                 Divider()
+                Button("Create Grid…", systemImage: "square.grid.3x2") {
+                    showCreateGridSheet = true
+                }
+                .disabled(document.selectedIDs.count < 2)
+                .help("Arrange the selected images into a clean grid")
                 Button("Duplicate", systemImage: "plus.square.on.square") {
                     document.duplicateItems(document.selectedIDs)
                 }
@@ -291,6 +297,10 @@ struct CanvasView: View {
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             showGuideColorPanel()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .clearAllGuides)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            document.clearAllGuides()
+        }
         .modifier(EditMenuCommands(
             document: document,
             hostWindow: hostWindow,
@@ -302,6 +312,18 @@ struct CanvasView: View {
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             document.refreshFromDisk()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .createGrid)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            if document.selectedIDs.count >= 2 { showCreateGridSheet = true }
+        }
+        .onChange(of: document.selectedIDs) { _, newValue in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            MenuSelectionState.shared.hasMultipleSelected = newValue.count >= 2
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window = note.object as? NSWindow, window === hostWindow else { return }
+            MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+        }
         .onAppear {
             installKeyMonitor()
             installScrollMonitor()
@@ -309,6 +331,9 @@ struct CanvasView: View {
             // only arrive later via WindowAccessor's async assignment — the
             // onChange below covers that second case.
             hostWindow?.representedURL = document.ltFileURL
+            if hostWindow != nil, hostWindow === NSApp.keyWindow {
+                MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+            }
         }
         .onDisappear {
             removeKeyMonitor()
@@ -320,6 +345,9 @@ struct CanvasView: View {
             // ⌘-click (or right-click the proxy icon) the title bar to see
             // the .lt file's full path, exactly like any document window.
             newWindow?.representedURL = document.ltFileURL
+            if newWindow != nil, newWindow === NSApp.keyWindow {
+                MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+            }
         }
         .sheet(isPresented: cropSheetBinding) {
             if let id = cropModeItemID {
@@ -328,6 +356,14 @@ struct CanvasView: View {
         }
         .sheet(isPresented: $showRenameSheet) {
             RenamePanelView(document: document, isPresented: $showRenameSheet)
+        }
+        .sheet(isPresented: $showCreateGridSheet) {
+            CreateGridSheet { spacing, isPercentage in
+                showCreateGridSheet = false
+                document.createGrid(document.selectedIDs, spacing: spacing, isPercentage: isPercentage)
+            } onCancel: {
+                showCreateGridSheet = false
+            }
         }
         .alert("Can't Add Image", isPresented: Binding(
             get: { document.importError != nil },

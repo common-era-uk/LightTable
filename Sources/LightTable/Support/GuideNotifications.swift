@@ -9,6 +9,7 @@ import Foundation
 extension Notification.Name {
     static let toggleShowGuides = Notification.Name("LightTable.toggleShowGuides")
     static let openGuideColorPicker = Notification.Name("LightTable.openGuideColorPicker")
+    static let clearAllGuides = Notification.Name("LightTable.clearAllGuides")
     static let cropSelected = Notification.Name("LightTable.cropSelected")
     static let deleteSelected = Notification.Name("LightTable.deleteSelected")
     static let duplicateSelected = Notification.Name("LightTable.duplicateSelected")
@@ -22,4 +23,5 @@ extension Notification.Name {
     static let bringToFront = Notification.Name("LightTable.bringToFront")
     static let sendBackward = Notification.Name("LightTable.sendBackward")
     static let sendToBack = Notification.Name("LightTable.sendToBack")
+    static let createGrid = Notification.Name("LightTable.createGrid")
 }

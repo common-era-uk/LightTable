@@ -2,6 +2,14 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.0.10 — 2026-08-27
+
+- Added "Create Grid" — select two or more images and click the toolbar's Create Grid button (SF icon, before Duplicate) or use View > "Create Grid…" to arrange them into a clean grid with configurable spacing (points or percentage). Images already sitting in a rough row are kept together; rows only merge or split where the canvas width actually requires it, and all images are resized to a shared height. The View menu item is disabled unless 2+ images are selected.
+- Added View > "Clear All Guides", right after "Change Guide Color…", to remove every guide from the canvas in one step.
+- Reduced the canvas's auto-extend margin (the space it grows beyond your content) by 20%, from 200pt to 160pt.
+- Added keyboard shortcuts to the Edit menu: Crop (⇧⌘C), Remove from Canvas (Delete), and Delete from Folder (⌘Delete).
+- Moved the "Layer images" tip and added a new "Create Grid" tip to the About screen's Details section.
+
 ## 1.0.9 — 2026-08-22
 
 - Added image layering: Edit > "Bring Forward" (⌘]), "Bring to Front" (⇧⌘]), "Send Backward" (⌘[), and "Send to Back" (⇧⌘[) reorder the selected image(s) above or below the cards around them.
