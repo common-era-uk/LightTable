@@ -6,9 +6,10 @@ struct RenamePanelView: View {
     @Binding var isPresented: Bool
 
     @State private var baseName: String = "image"
-    @State private var separator: String = "_"
+    @State private var separator: String = "-"
     @State private var startNumber: Int = 1
-    @State private var padding: Int = 3
+    @State private var padding: Int = 2
+    @State private var applyCropsBeforeRenaming = false
     @State private var renameError: String?
 
     private var orderedItems: [CanvasItem] {
@@ -61,6 +62,9 @@ struct RenamePanelView: View {
             }
             .frame(minHeight: 200, maxHeight: 320)
 
+            Toggle("Apply crops before renaming", isOn: $applyCropsBeforeRenaming)
+                .help("Images with a saved crop get the crop baked into their pixels as part of renaming, instead of being copied/renamed as-is. With \"Copy and Rename in a Different Folder…\" this only affects the new copies. With \"Rename Original Files\" this replaces the original file's pixels — the untouched original is moved to Trash first, so it's still recoverable there.")
+
             HStack {
                 Button("Cancel") { isPresented = false }
                     .keyboardShortcut(.cancelAction)
@@ -94,6 +98,7 @@ struct RenamePanelView: View {
         // when new names overlap with existing ones (e.g. renumbering).
         // Only items that actually moved get a temp-name entry, so a failure
         // here can never desync the model (updated below) from disk.
+        let fullFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
         var tempNames: [UUID: String] = [:]
         var failures = 0
         for pair in plan {
@@ -101,7 +106,15 @@ struct RenamePanelView: View {
             let from = folder.appendingPathComponent(pair.item.filename)
             let to = folder.appendingPathComponent(tempName)
             do {
-                try fm.moveItem(at: from, to: to)
+                if applyCropsBeforeRenaming, pair.item.cropRect != fullFrame {
+                    // The original's pixels are being replaced, so it goes to
+                    // Trash rather than a plain move — still recoverable
+                    // there, unlike the non-destructive crop tool's "Apply".
+                    try ImageExport.exportCroppedImage(sourceURL: from, cropRect: pair.item.cropRect, to: to)
+                    try? fm.trashItem(at: from, resultingItemURL: nil)
+                } else {
+                    try fm.moveItem(at: from, to: to)
+                }
                 tempNames[pair.item.id] = tempName
             } catch {
                 failures += 1
@@ -156,6 +169,7 @@ struct RenamePanelView: View {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Choose"
+        panel.directoryURL = document.folderURL
         guard panel.runModal() == .OK, let destFolder = panel.url else { return }
 
         let plan = plannedNames
@@ -163,12 +177,17 @@ struct RenamePanelView: View {
         let sourceFolder = document.folderURL
         var failures = 0
 
+        let fullFrame = CGRect(x: 0, y: 0, width: 1, height: 1)
         for pair in plan {
             let from = sourceFolder.appendingPathComponent(pair.item.filename)
             let finalName = ImageFileSupport.availableFilename(for: pair.newName, in: destFolder)
             let to = destFolder.appendingPathComponent(finalName)
             do {
-                try fm.copyItem(at: from, to: to)
+                if applyCropsBeforeRenaming, pair.item.cropRect != fullFrame {
+                    try ImageExport.exportCroppedImage(sourceURL: from, cropRect: pair.item.cropRect, to: to)
+                } else {
+                    try fm.copyItem(at: from, to: to)
+                }
             } catch {
                 failures += 1
             }

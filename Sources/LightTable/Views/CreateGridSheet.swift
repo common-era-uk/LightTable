@@ -5,12 +5,12 @@ struct CreateGridSheet: View {
     let onCancel: () -> Void
 
     private enum SpacingUnit: String, CaseIterable {
-        case points = "Points"
         case percentage = "Percentage"
+        case points = "Points"
     }
 
     @State private var spacingValue: Double = 20
-    @State private var unit: SpacingUnit = .points
+    @State private var unit: SpacingUnit = .percentage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

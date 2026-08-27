@@ -6,7 +6,7 @@ private enum Corner: CaseIterable {
 }
 
 private enum AspectPreset: Equatable {
-    case freeform, original, square, fourFive, fiveSeven, nineSixteen
+    case freeform, original, square, fourFive, threeFour, fiveSeven, nineSixteen, custom
 }
 
 struct CropView: View {
@@ -18,6 +18,8 @@ struct CropView: View {
     @State private var dragBaseline: CGRect?
     @State private var aspectPreset: AspectPreset = .freeform
     @State private var isPortrait = true
+    @State private var customRatioW: Double = 1
+    @State private var customRatioH: Double = 1
     @State private var exportError: String?
     @State private var draggingCorner: Corner?
 
@@ -71,10 +73,15 @@ struct CropView: View {
             canonical = 1
         case .fourFive:
             canonical = 4.0 / 5.0
+        case .threeFour:
+            canonical = 3.0 / 4.0
         case .fiveSeven:
             canonical = 5.0 / 7.0
         case .nineSixteen:
             canonical = 9.0 / 16.0
+        case .custom:
+            let raw = customRatioW / max(customRatioH, 0.0001)
+            canonical = raw <= 1 ? raw : 1 / raw
         }
         return isPortrait ? canonical : 1 / canonical
     }
@@ -131,7 +138,7 @@ struct CropView: View {
             }
         }
         .padding(24)
-        .frame(width: max(displaySize.width + 80, 400), height: displaySize.height + 260)
+        .frame(width: max(displaySize.width + 80, 610), height: displaySize.height + 260 + (aspectPreset == .custom ? 30 : 0))
         .alert("Export Failed", isPresented: Binding(
             get: { exportError != nil },
             set: { isPresented in if !isPresented { exportError = nil } }
@@ -143,21 +150,44 @@ struct CropView: View {
     }
 
     private var aspectControls: some View {
-        HStack(spacing: 8) {
-            presetButton("Freeform", preset: .freeform)
-            presetButton("Original", preset: .original)
-            presetButton("1:1", preset: .square)
-            presetButton("4:5", preset: .fourFive)
-            presetButton("5:7", preset: .fiveSeven)
-            presetButton("9:16", preset: .nineSixteen)
-            Spacer()
-            Button("Rotate", systemImage: "rectangle.portrait.rotate") {
-                isPortrait.toggle()
-                applyAspectToCropRect()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                presetButton("Freeform", preset: .freeform)
+                presetButton("Original", preset: .original)
+                presetButton("1:1", preset: .square)
+                presetButton("4:5", preset: .fourFive)
+                presetButton("3:4", preset: .threeFour)
+                presetButton("5:7", preset: .fiveSeven)
+                presetButton("9:16", preset: .nineSixteen)
+                presetButton("Custom…", preset: .custom)
+                Spacer()
+                Button("Rotate", systemImage: "rectangle.portrait.rotate") {
+                    isPortrait.toggle()
+                    applyAspectToCropRect()
+                }
+                .disabled(aspectPreset == .freeform)
+                .labelStyle(.iconOnly)
+                .help("Switch between portrait and landscape")
             }
-            .disabled(aspectPreset == .freeform)
-            .labelStyle(.iconOnly)
-            .help("Switch between portrait and landscape")
+
+            if aspectPreset == .custom {
+                HStack(spacing: 6) {
+                    TextField("", value: $customRatioW, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .frame(width: 40)
+                        .onChange(of: customRatioW) { _, _ in applyAspectToCropRect() }
+                    Text(":")
+                    TextField("", value: $customRatioH, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .frame(width: 40)
+                        .onChange(of: customRatioH) { _, _ in applyAspectToCropRect() }
+                    Text("custom ratio (width : height)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 
@@ -317,11 +347,16 @@ struct CropView: View {
                 if dragBaseline == nil { dragBaseline = baseline }
                 let dx = value.translation.width / displaySize.width
                 let dy = value.translation.height / displaySize.height
+                let isCenterScale = NSEvent.modifierFlags.contains(.option)
                 if let target = targetAspect {
                     let normalizedAspect = target / nativeAspect
-                    cropRect = adjustedRectAspectLocked(baseline: baseline, corner: corner, dx: dx, dy: dy, normalizedAspect: normalizedAspect)
+                    cropRect = isCenterScale
+                        ? centerScaledRectAspectLocked(baseline: baseline, corner: corner, dx: dx, dy: dy, normalizedAspect: normalizedAspect)
+                        : adjustedRectAspectLocked(baseline: baseline, corner: corner, dx: dx, dy: dy, normalizedAspect: normalizedAspect)
                 } else {
-                    cropRect = adjustedRect(baseline: baseline, corner: corner, dx: dx, dy: dy)
+                    cropRect = isCenterScale
+                        ? centerScaledRect(baseline: baseline, corner: corner, dx: dx, dy: dy)
+                        : adjustedRect(baseline: baseline, corner: corner, dx: dx, dy: dy)
                 }
             }
             .onEnded { _ in
@@ -353,6 +388,25 @@ struct CropView: View {
         }
 
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// Freeform version of `adjustedRect` for ⌥-drag: grows symmetrically
+    /// from `baseline`'s center instead of anchoring the opposite corner,
+    /// clamped so the rect never leaves the unit square.
+    private func centerScaledRect(baseline: CGRect, corner: Corner, dx: Double, dy: Double) -> CGRect {
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+        let center = CGPoint(x: baseline.midX, y: baseline.midY)
+
+        var newWidth = baseline.width + 2 * (isRight ? dx : -dx)
+        var newHeight = baseline.height + 2 * (isBottom ? dy : -dy)
+
+        let maxWidth = 2 * min(center.x, 1 - center.x)
+        let maxHeight = 2 * min(center.y, 1 - center.y)
+        newWidth = min(max(newWidth, minSize), max(maxWidth, minSize))
+        newHeight = min(max(newHeight, minSize), max(maxHeight, minSize))
+
+        return CGRect(x: center.x - newWidth / 2, y: center.y - newHeight / 2, width: newWidth, height: newHeight)
     }
 
     /// Resizes `baseline` from `corner`, keeping `normalizedAspect` (in
@@ -390,6 +444,37 @@ struct CropView: View {
         let y = isBottom ? anchorY : anchorY - newHeight
 
         return CGRect(x: x, y: y, width: newWidth, height: newHeight)
+    }
+
+    /// Aspect-locked version of `adjustedRectAspectLocked` for ⌥-drag: grows
+    /// symmetrically from `baseline`'s center, keeping `normalizedAspect`
+    /// locked, clamped so the rect never leaves the unit square.
+    private func centerScaledRectAspectLocked(baseline: CGRect, corner: Corner, dx: Double, dy: Double, normalizedAspect: Double) -> CGRect {
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+        let center = CGPoint(x: baseline.midX, y: baseline.midY)
+
+        let widthRaw = baseline.width + 2 * (isRight ? dx : -dx)
+        let heightRaw = baseline.height + 2 * (isBottom ? dy : -dy)
+        let scale = max(widthRaw / baseline.width, heightRaw / baseline.height, minSize / baseline.width, minSize / baseline.height)
+        var newWidth = baseline.width * scale
+        var newHeight = newWidth / normalizedAspect
+
+        let maxWidthFromBounds = 2 * min(center.x, 1 - center.x)
+        let maxHeightFromBounds = 2 * min(center.y, 1 - center.y)
+
+        if newWidth > maxWidthFromBounds {
+            newWidth = maxWidthFromBounds
+            newHeight = newWidth / normalizedAspect
+        }
+        if newHeight > maxHeightFromBounds {
+            newHeight = maxHeightFromBounds
+            newWidth = newHeight * normalizedAspect
+        }
+        newWidth = max(newWidth, minSize)
+        newHeight = max(newHeight, minSize)
+
+        return CGRect(x: center.x - newWidth / 2, y: center.y - newHeight / 2, width: newWidth, height: newHeight)
     }
 
     private func applyCrop(alsoExport: Bool) {

@@ -9,6 +9,17 @@ All notable changes to LightTable are tracked here, most recent first.
 - Reduced the canvas's auto-extend margin (the space it grows beyond your content) by 20%, from 200pt to 160pt.
 - Added keyboard shortcuts to the Edit menu: Crop (⇧⌘C), Remove from Canvas (Delete), and Delete from Folder (⌘Delete).
 - Moved the "Layer images" tip and added a new "Create Grid" tip to the About screen's Details section.
+- Create Grid now defaults to Percentage spacing (20%) instead of Points, and Percentage is listed first.
+- Fixed "Copy and Rename in a Different Folder…" opening its folder picker wherever it was last left, instead of at the canvas's own folder.
+- Added a "Custom…" aspect ratio option to the crop tool — enter any width:height ratio in two small fields, and it behaves like the built-in presets (draggable, flippable with Rotate).
+- Added a "3:4" preset to the crop tool, between "4:5" and "5:7".
+- Fixed the crop tool's window being too narrow for vertical images, truncating the aspect preset row; it now has a fixed minimum width so all presets always fit on one line.
+- Added the missing keyboard shortcuts to the image card right-click menu — Crop (⇧⌘C), Duplicate (⌘D), Remove from Canvas (Delete), Delete from Folder (⌘Delete) — matching the Edit menu.
+- Hold ⌥ (Option) while dragging a corner handle to scale an image card, or the crop box, from its center instead of from the opposite corner.
+- Scaling multiple selected cards together (⌘-drag a corner) now scales the whole selection as one rigid block from a shared anchor point, so gaps between cards scale proportionally instead of each card drifting independently and potentially overlapping.
+- Added "Apply crops before renaming" to the rename panel — images with a saved crop get the crop baked into their pixels as part of renaming. With "Copy and Rename in a Different Folder…" this only affects the new copies; with "Rename Original Files" it replaces the original's pixels (the untouched original is moved to Trash first, so it stays recoverable).
+- Changed the rename panel's defaults: separator "-", start at 1, 2 digits.
+- Right-clicking a card that's part of a multi-selection now shows "Create Grid…" as the first menu item, with a divider after it.
 
 ## 1.0.9 — 2026-08-22
 

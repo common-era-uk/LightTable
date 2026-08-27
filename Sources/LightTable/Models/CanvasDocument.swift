@@ -75,12 +75,15 @@ final class CanvasDocument: ObservableObject {
     /// group drag is in progress (visual preview only).
     @Published var groupDragOffset: CGSize = .zero
     /// Live, uncommitted group-scale state while ⌘-dragging a corner handle
-    /// with multiple items selected — every other selected card previews
-    /// itself scaled by `groupResizeScale` from its own matching corner.
+    /// with multiple items selected — the whole selection scales as one
+    /// rigid block from `groupResizeAnchor` (a fixed point shared by every
+    /// selected card, so gaps between cards scale proportionally instead of
+    /// each card drifting from its own independent anchor). Every other
+    /// selected card previews itself via `groupResizeAnchor`/`groupResizeScale`;
     /// `groupResizeSourceID` is the card actually being dragged, so it can
     /// skip this and use its own precise live rect instead.
     @Published var groupResizeScale: CGFloat?
-    @Published var groupResizeCorner: CardCorner?
+    @Published var groupResizeAnchor: CGPoint?
     @Published var groupResizeSourceID: UUID?
     @Published var importError: String?
     @Published var verticalGuides: [Guide] = []

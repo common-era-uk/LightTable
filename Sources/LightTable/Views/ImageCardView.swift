@@ -14,6 +14,7 @@ struct ImageCardView: View {
 
     @State private var liveRect: CGRect?
     @State private var dragBaseline: CGRect?
+    @State private var groupResizeBBoxBaseline: CGRect?
     @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     private let minSize: Double = 40
@@ -44,21 +45,31 @@ struct ImageCardView: View {
                     .onTapGesture(count: 2) { cropModeItemID = itemID }
                     .onTapGesture { selectOnTap() }
                     .contextMenu {
+                        if document.selectedIDs.contains(itemID), document.selectedIDs.count > 1 {
+                            Button("Create Grid…") {
+                                NotificationCenter.default.post(name: .createGrid, object: nil)
+                            }
+                            Divider()
+                        }
                         Button("Crop") {
                             let targets = contextMenuTargets()
                             if targets.count == 1, let id = targets.first {
                                 cropModeItemID = id
                             }
                         }
+                        .keyboardShortcut("c", modifiers: [.command, .shift])
                         Button("Duplicate") {
                             document.duplicateItems(contextMenuTargets())
                         }
+                        .keyboardShortcut("d", modifiers: .command)
                         Button("Remove from Canvas") {
                             document.removeFromCanvas(contextMenuTargets())
                         }
+                        .keyboardShortcut(.delete, modifiers: [])
                         Button("Delete from Folder") {
                             document.deleteItems(contextMenuTargets())
                         }
+                        .keyboardShortcut(.delete, modifiers: .command)
                         Divider()
                         Button("Bring Forward") {
                             document.bringForward(contextMenuTargets())
@@ -104,8 +115,8 @@ struct ImageCardView: View {
         if isSelected,
            let sourceID = document.groupResizeSourceID, sourceID != itemID,
            let scale = document.groupResizeScale,
-           let corner = document.groupResizeCorner {
-            return Self.scaledRect(from: item.frame, corner: corner, scale: scale, minSize: minSize)
+           let anchor = document.groupResizeAnchor {
+            return Self.transformedRect(item.frame, anchor: anchor, scale: scale)
         }
         return item.frame
     }
@@ -248,88 +259,142 @@ struct ImageCardView: View {
         )
     }
 
-    /// Plain drag resizes just this card. Holding ⌘ while multiple cards are
-    /// selected also broadcasts a scale factor (derived from this card's own
-    /// resize) via the document, so every other selected card can preview
-    /// and then commit the same proportional scale from its own matching
-    /// corner — each keeps its own aspect ratio and position anchor, only
-    /// the resize itself is shared.
+    /// Plain drag resizes just this card, anchored at the corner opposite the
+    /// one being dragged — or at the card's own center if ⌥ is held, growing
+    /// symmetrically in both directions. Holding ⌘ while multiple cards are
+    /// selected instead scales the whole selection as one rigid block: every
+    /// selected card (this one included) is scaled from a single shared
+    /// anchor point — the group bounding box's fixed corner, or its center
+    /// if ⌥ is also held — so gaps between cards scale proportionally
+    /// instead of each card drifting from its own independent anchor.
     private func cornerDragGesture(_ corner: CardCorner) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
             .onChanged { value in
                 let baseline = dragBaseline ?? (item?.frame ?? .zero)
                 if dragBaseline == nil { dragBaseline = baseline }
-                let newRect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height)
-                liveRect = newRect
 
+                let isCenterScale = NSEvent.modifierFlags.contains(.option)
                 let isGroupScale = NSEvent.modifierFlags.contains(.command)
                     && document.selectedIDs.count > 1
                     && document.selectedIDs.contains(itemID)
-                    && baseline.width > 0
+
                 if isGroupScale {
-                    document.groupResizeScale = newRect.width / baseline.width
-                    document.groupResizeCorner = corner
+                    let bboxBaseline = groupResizeBBoxBaseline ?? Self.boundingBox(of: document.selectedIDs, items: document.items, fallback: baseline)
+                    if groupResizeBBoxBaseline == nil { groupResizeBBoxBaseline = bboxBaseline }
+
+                    let selected = document.items.filter { document.selectedIDs.contains($0.id) }
+                    let minScale = selected.reduce(0.0) { partial, card in
+                        max(partial, minSize / max(card.width, 1), minSize / max(card.height, 1))
+                    }
+                    let scale = Self.groupScaleFactor(
+                        bboxBaseline: bboxBaseline, corner: corner,
+                        dx: value.translation.width, dy: value.translation.height,
+                        isCenterScale: isCenterScale, minScale: minScale
+                    )
+                    let anchor = isCenterScale
+                        ? CGPoint(x: bboxBaseline.midX, y: bboxBaseline.midY)
+                        : Self.fixedAnchor(of: bboxBaseline, corner: corner)
+
+                    document.groupResizeScale = scale
+                    document.groupResizeAnchor = anchor
                     document.groupResizeSourceID = itemID
+                    liveRect = Self.transformedRect(baseline, anchor: anchor, scale: scale)
                 } else {
+                    groupResizeBBoxBaseline = nil
                     document.groupResizeScale = nil
-                    document.groupResizeCorner = nil
+                    document.groupResizeAnchor = nil
                     document.groupResizeSourceID = nil
+                    liveRect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, isCenterScale: isCenterScale)
                 }
             }
             .onEnded { _ in
-                if let rect = liveRect {
-                    let scale = document.groupResizeScale
-                    let activeCorner = document.groupResizeCorner
-                    document.registerUndoCheckpoint(actionName: scale != nil ? "Scale Selection" : "Resize")
-
-                    if let scale, let activeCorner {
-                        for id in document.selectedIDs {
-                            if id == itemID {
-                                document.updateItem(id) { current in
-                                    current.x = rect.minX
-                                    current.y = rect.minY
-                                    current.width = rect.width
-                                    current.height = rect.height
-                                }
-                            } else if let target = document.items.first(where: { $0.id == id }) {
-                                let scaled = Self.scaledRect(from: target.frame, corner: activeCorner, scale: scale, minSize: minSize)
-                                document.updateItem(id) { current in
-                                    current.x = scaled.minX
-                                    current.y = scaled.minY
-                                    current.width = scaled.width
-                                    current.height = scaled.height
-                                }
-                            }
+                if let scale = document.groupResizeScale, let anchor = document.groupResizeAnchor {
+                    document.registerUndoCheckpoint(actionName: "Scale Selection")
+                    for id in document.selectedIDs {
+                        guard let target = document.items.first(where: { $0.id == id }) else { continue }
+                        let transformed = Self.transformedRect(target.frame, anchor: anchor, scale: scale)
+                        document.updateItem(id) { current in
+                            current.x = transformed.minX
+                            current.y = transformed.minY
+                            current.width = transformed.width
+                            current.height = transformed.height
                         }
-                    } else {
-                        document.updateItem(itemID) { current in
-                            current.x = rect.minX
-                            current.y = rect.minY
-                            current.width = rect.width
-                            current.height = rect.height
-                        }
+                    }
+                } else if let rect = liveRect {
+                    document.registerUndoCheckpoint(actionName: "Resize")
+                    document.updateItem(itemID) { current in
+                        current.x = rect.minX
+                        current.y = rect.minY
+                        current.width = rect.width
+                        current.height = rect.height
                     }
                 }
                 liveRect = nil
                 dragBaseline = nil
+                groupResizeBBoxBaseline = nil
                 document.groupResizeScale = nil
-                document.groupResizeCorner = nil
+                document.groupResizeAnchor = nil
                 document.groupResizeSourceID = nil
                 document.save()
             }
     }
 
-    /// Scales `frame` by `scale`, anchored at its corner opposite `corner`
-    /// (matching the anchor semantics of `adjustedRect`), clamped so it
-    /// never crosses the canvas's left/top edges.
-    private static func scaledRect(from frame: CGRect, corner: CardCorner, scale: CGFloat, minSize: Double) -> CGRect {
-        let width = max(frame.width * scale, minSize)
-        let height = max(frame.height * scale, minSize)
+    /// The union of every selected card's stored frame, captured once at the
+    /// start of a group-scale drag so the whole selection scales from one
+    /// stable rectangle rather than one that shifts as cards are transformed.
+    private static func boundingBox(of ids: Set<UUID>, items: [CanvasItem], fallback: CGRect) -> CGRect {
+        let frames = items.filter { ids.contains($0.id) }.map(\.frame)
+        guard let first = frames.first else { return fallback }
+        return frames.dropFirst().reduce(first) { $0.union($1) }
+    }
+
+    /// The point that stays fixed while scaling `rect` from `corner` — the
+    /// corner diagonally opposite the one being dragged.
+    private static func fixedAnchor(of rect: CGRect, corner: CardCorner) -> CGPoint {
         let isRight = corner == .topRight || corner == .bottomRight
         let isBottom = corner == .bottomLeft || corner == .bottomRight
-        let x = max(isRight ? frame.minX : frame.maxX - width, 0)
-        let y = max(isBottom ? frame.minY : frame.maxY - height, 0)
+        return CGPoint(x: isRight ? rect.minX : rect.maxX, y: isBottom ? rect.minY : rect.maxY)
+    }
+
+    /// Scales `rect` by `scale` about `anchor` — the single formula shared by
+    /// every selected card during a group scale, whether `anchor` is a fixed
+    /// corner or (⌥ held) the group's center.
+    private static func transformedRect(_ rect: CGRect, anchor: CGPoint, scale: CGFloat) -> CGRect {
+        let width = rect.width * scale
+        let height = rect.height * scale
+        let x = anchor.x + (rect.minX - anchor.x) * scale
+        let y = anchor.y + (rect.minY - anchor.y) * scale
         return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// The uniform scale factor that dragging `corner` of `bboxBaseline` by
+    /// (dx, dy) implies — growing from the opposite corner, or symmetrically
+    /// from the center if `isCenterScale`. Clamped so the fixed side(s) never
+    /// cross the canvas's left/top edges (or, when centered, so the whole
+    /// box stays within them) and so no selected card would drop below
+    /// `minScale`.
+    private static func groupScaleFactor(bboxBaseline: CGRect, corner: CardCorner, dx: Double, dy: Double, isCenterScale: Bool, minScale: Double) -> CGFloat {
+        guard bboxBaseline.width > 0, bboxBaseline.height > 0 else { return 1 }
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+
+        if isCenterScale {
+            let widthRaw = bboxBaseline.width + 2 * (isRight ? dx : -dx)
+            let heightRaw = bboxBaseline.height + 2 * (isBottom ? dy : -dy)
+            let center = CGPoint(x: bboxBaseline.midX, y: bboxBaseline.midY)
+            let maxScaleX = center.x > 0 ? (2 * center.x) / bboxBaseline.width : .infinity
+            let maxScaleY = center.y > 0 ? (2 * center.y) / bboxBaseline.height : .infinity
+            var scale = max(widthRaw / bboxBaseline.width, heightRaw / bboxBaseline.height, minScale)
+            scale = min(scale, maxScaleX, maxScaleY)
+            return max(scale, minScale)
+        } else {
+            let widthRaw = bboxBaseline.width + (isRight ? dx : -dx)
+            let heightRaw = bboxBaseline.height + (isBottom ? dy : -dy)
+            var scale = max(widthRaw / bboxBaseline.width, heightRaw / bboxBaseline.height, minScale)
+            if !isRight { scale = min(scale, bboxBaseline.maxX / bboxBaseline.width) }
+            if !isBottom { scale = min(scale, bboxBaseline.maxY / bboxBaseline.height) }
+            return max(scale, minScale)
+        }
     }
 
     /// Resizes `baseline` from `corner`, keeping its aspect ratio locked and
@@ -338,8 +403,15 @@ struct ImageCardView: View {
     /// auto-extends on the right/bottom, so the left/top edges are hard
     /// bounds rather than something that can grow to meet the card. If the
     /// free corner lands near a guide, snaps to it (see `snappedScale`).
-    private func adjustedRect(baseline: CGRect, corner: CardCorner, dx: Double, dy: Double) -> CGRect {
+    private func adjustedRect(baseline: CGRect, corner: CardCorner, dx: Double, dy: Double, isCenterScale: Bool) -> CGRect {
         guard baseline.width > 0, baseline.height > 0 else { return baseline }
+
+        let minScaleForCenter = max(minSize / baseline.width, minSize / baseline.height)
+        if isCenterScale {
+            let scale = Self.groupScaleFactor(bboxBaseline: baseline, corner: corner, dx: dx, dy: dy, isCenterScale: true, minScale: minScaleForCenter)
+            let anchor = CGPoint(x: baseline.midX, y: baseline.midY)
+            return Self.transformedRect(baseline, anchor: anchor, scale: scale)
+        }
 
         let isRight = corner == .topRight || corner == .bottomRight
         let isBottom = corner == .bottomLeft || corner == .bottomRight
