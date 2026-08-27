@@ -9,7 +9,7 @@
             <sparkle:shortVersionString>1.0.10</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.0.10/LightTable-1.0.10.zip" length="1834992" type="application/octet-stream" sparkle:edSignature="TdC8RIc6HQCSDvLMwTOI8hyuP2qKGc0Rr38srFnNx/d60p9gZGtFdROnxVb0Z5Xmvfj7o4Sq4rk4pMcETs3HBQ=="/>
+            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.0.10/LightTable-1.0.10.zip" length="1847145" type="application/octet-stream" sparkle:edSignature="VD1ZKCAPGZOyjnwt5hY10V/YygQwPdLgtq6PndRdNHdBQZF/wTNE5H60S8zod3Czsxm/Q1lmkkBKezLVgzPNDg=="/>
         </item>
         <item>
             <title>1.0.7</title>
