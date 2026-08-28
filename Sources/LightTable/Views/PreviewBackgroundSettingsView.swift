@@ -8,7 +8,7 @@ struct PreviewBackgroundSettingsView: View {
             Text("Large Preview Background")
                 .font(.title2.bold())
 
-            ColorPicker("Background color", selection: $settings.color, supportsOpacity: false)
+            ColorPicker("Background colour", selection: $settings.color, supportsOpacity: false)
 
             slider("Opacity", value: $settings.opacity, range: 0...1, format: "%.0f%%", displayScale: 100)
 
@@ -16,7 +16,7 @@ struct PreviewBackgroundSettingsView: View {
 
             Toggle("Show filename", isOn: $settings.showFilename)
 
-            ColorPicker("Filename color", selection: $settings.filenameColor, supportsOpacity: false)
+            ColorPicker("Filename colour", selection: $settings.filenameColor, supportsOpacity: false)
                 .disabled(!settings.showFilename)
                 .opacity(settings.showFilename ? 1 : 0.4)
 

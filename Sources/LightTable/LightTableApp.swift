@@ -27,6 +27,26 @@ struct LightTableApp: App {
                 }
             }
             CommandGroup(replacing: .pasteboard) {
+                // Standard text-editing actions, dispatched up the responder
+                // chain the normal AppKit way — lets ⌘X/⌘C/⌘V work in any
+                // text field/editor (e.g. the text item formatting sheet)
+                // even though the canvas itself has no clipboard concept of
+                // its own. This group otherwise replaces Cut/Copy/Paste
+                // entirely, so without these, focusing a text field had no
+                // menu-level Copy/Paste at all.
+                Button("Cut") {
+                    NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut("x", modifiers: .command)
+                Button("Copy") {
+                    NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut("c", modifiers: .command)
+                Button("Paste") {
+                    NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+                }
+                .keyboardShortcut("v", modifiers: .command)
+                Divider()
                 Button("Select All") {
                     NotificationCenter.default.post(name: .selectAllItems, object: nil)
                 }
@@ -64,7 +84,27 @@ struct LightTableApp: App {
                     NotificationCenter.default.post(name: .sendToBack, object: nil)
                 }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
+                Divider()
+                Button("Insert Text Field") {
+                    NotificationCenter.default.post(name: .insertTextField, object: nil)
+                }
+                Button("Insert Text Box") {
+                    NotificationCenter.default.post(name: .insertTextBox, object: nil)
+                }
             }
+            // "New Window" itself stays the automatic default content of
+            // .newItem (adding after, not replacing it, so its real
+            // behavior is never reimplemented here) — but everything from
+            // "Open…" through "Close All" lives in this one group with it.
+            // SwiftUI/AppKit inserts its own automatic separator at the
+            // boundary between two *different* named placements, on top of
+            // any Divider() already placed there, which produced doubled-up
+            // separators when this content used to be split across a
+            // separate `.newItem`-placed group and a `.saveItem`-placed one.
+            // One group means every separator here is exactly the one
+            // `Divider()` written for it — .saveItem's own default content
+            // (Close/Close All) is suppressed below with an empty
+            // replacement, since it's placed here at the bottom instead.
             CommandGroup(after: .newItem) {
                 Button("Open…") {
                     presentOpenPanel()
@@ -85,23 +125,23 @@ struct LightTableApp: App {
                         }
                     }
                 }
-            }
-            // Replaces (rather than adds after) .saveItem — its default
-            // content is where "Close"/"Close All" are automatically
-            // supplied from, and there's no separate placement to target
-            // just those. Rebuilding the whole group here is what lets them
-            // move to the bottom of the menu instead of their default spot
-            // right after Open Recent.
-            CommandGroup(replacing: .saveItem) {
-                Button("Bulk Rename…") {
-                    NotificationCenter.default.post(name: .bulkRename, object: nil)
+                Divider()
+                Button("Set Art Board Size…") {
+                    NotificationCenter.default.post(name: .openBoardSizeDialog, object: nil)
                 }
+                Divider()
                 Button("Save As…") {
                     NotificationCenter.default.post(name: .saveDocumentAs, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Export as PDF…") {
+                    NotificationCenter.default.post(name: .exportPDF, object: nil)
+                }
                 Button("Package…") {
                     NotificationCenter.default.post(name: .packageDocument, object: nil)
+                }
+                Button("Bulk Rename…") {
+                    NotificationCenter.default.post(name: .bulkRename, object: nil)
                 }
                 Divider()
                 Button("Close") {
@@ -115,6 +155,10 @@ struct LightTableApp: App {
                 }
                 .keyboardShortcut("w", modifiers: [.command, .option])
             }
+            // Empty — just suppresses .saveItem's own default content
+            // (Close/Close All), which are placed above instead, at the
+            // bottom of the .newItem group.
+            CommandGroup(replacing: .saveItem) {}
             CommandGroup(after: .toolbar) {
                 Divider()
                 Button("Create Grid…") {
@@ -125,7 +169,7 @@ struct LightTableApp: App {
                 Button("Toggle Guides") {
                     NotificationCenter.default.post(name: .toggleShowGuides, object: nil)
                 }
-                Button("Change Guide Color…") {
+                Button("Change Guide Colour…") {
                     NotificationCenter.default.post(name: .openGuideColorPicker, object: nil)
                 }
                 Button("Clear All Guides") {

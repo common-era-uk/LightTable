@@ -29,8 +29,23 @@ struct CanvasView: View {
     var onChangeFolder: () -> Void
 
     @State private var cropModeItemID: UUID?
+    @State private var textFormatItemID: UUID?
     @State private var showRenameSheet = false
     @State private var showCreateGridSheet = false
+    @State private var showBoardSizeDialog = false
+    @State private var showPDFExport = false
+    @State private var showExportBoardChoice = false
+    @State private var moveBoardIndex: Int?
+    /// Which board the mouse is currently over, kept live via
+    /// `.onContinuousHover` — the single board-management context menu
+    /// (see `boardContextMenuActions`) reads this rather than each board
+    /// background carrying its own `.contextMenu`. Per-instance context
+    /// menus on visually-identical `ForEach` siblings turned out to
+    /// sometimes trigger the wrong sibling's actions on macOS (confirmed via
+    /// debug logging — the captured index was right, but the wrong board's
+    /// menu instance fired); one menu with explicit hit-testing sidesteps
+    /// that regardless of the exact cause.
+    @State private var hoveredBoardIndex: Int?
     @State private var previewItemID: UUID?
     @State private var isSpaceDown = false
     @State private var spacePanBaseline: CGSize?
@@ -54,23 +69,20 @@ struct CanvasView: View {
     @State private var widthDragBaseline: Double?
     @State private var heightDragBaseline: Double?
     @State private var draggingEdge: ResizableEdge?
+    @State private var resizingBoardIndex: Int?
 
     @State private var pendingGuide: PendingGuide?
 
     private let minZoom: CGFloat = 0.2
     private let maxZoom: CGFloat = 3.0
     private let rulerThickness: Double = 14
+    /// How far below a board its order number and (for the last board) the
+    /// "+" button sit.
+    private let boardControlsOffset: Double = 20
 
-    private var contentSize: CGSize {
-        let extents = document.items.reduce(into: (maxX: 0.0, maxY: 0.0)) { acc, item in
-            acc.maxX = max(acc.maxX, item.x + item.width)
-            acc.maxY = max(acc.maxY, item.y + item.height)
-        }
-        return CGSize(
-            width: max(extents.maxX + 160, document.canvasWidth),
-            height: max(extents.maxY + 160, document.canvasHeight)
-        )
-    }
+    private var contentSize: CGSize { document.stackedContentSize() }
+    private var boardOrigins: [CGPoint] { document.boardOrigins() }
+    private var boardSizesDisplay: [CGSize] { document.boardSizes.indices.map { document.boardDisplaySize($0) } }
 
     /// Where the canvas content currently lands on screen, in the outer
     /// (untransformed) viewport's own coordinate space.
@@ -80,6 +92,18 @@ struct CanvasView: View {
             y: panOffset.height,
             width: contentSize.width * zoom,
             height: contentSize.height * zoom
+        )
+    }
+
+    /// A point in the shared content space's on-screen (viewport) rect,
+    /// accounting for the current zoom/pan — the same transform the content
+    /// `ZStack` itself renders under.
+    private func screenRect(origin: CGPoint, size: CGSize) -> CGRect {
+        CGRect(
+            x: panOffset.width + origin.x * zoom,
+            y: panOffset.height + origin.y * zoom,
+            width: size.width * zoom,
+            height: size.height * zoom
         )
     }
 
@@ -97,13 +121,22 @@ struct CanvasView: View {
 
     /// Every card's left/right edges, offered to `RulerZones` so a guide
     /// being dragged in from the ruler can snap to them, the same way cards
-    /// snap to guides.
+    /// snap to guides. In the shared display space (each item's local edges
+    /// shifted by its own board's origin).
     private var cardEdgesX: [Double] {
-        document.items.flatMap { [$0.x, $0.x + $0.width] }
+        let origins = boardOrigins
+        return document.items.flatMap { item -> [Double] in
+            let ox = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex].x : 0
+            return [ox + item.x, ox + item.x + item.width]
+        }
     }
 
     private var cardEdgesY: [Double] {
-        document.items.flatMap { [$0.y, $0.y + $0.height] }
+        let origins = boardOrigins
+        return document.items.flatMap { item -> [Double] in
+            let oy = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex].y : 0
+            return [oy + item.y, oy + item.y + item.height]
+        }
     }
 
     private var marqueeRect: CGRect? {
@@ -122,10 +155,15 @@ struct CanvasView: View {
                 Color(nsColor: .underPageBackgroundColor)
 
                 ZStack(alignment: .topLeading) {
-                    document.canvasColor?.color ?? Color(nsColor: .textBackgroundColor)
-                    ForEach(document.items) { item in
-                        ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, showFilenames: showFilenames, zoom: zoom)
+                    ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
+                        BoardBackgroundView(
+                            document: document,
+                            index: index,
+                            origin: boardOrigin(for: index),
+                            size: boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+                        )
                     }
+                    itemCardsLayer
                     if let rect = marqueeRect {
                         Rectangle()
                             .fill(Color.accentColor.opacity(0.15))
@@ -134,10 +172,6 @@ struct CanvasView: View {
                             .position(x: rect.midX, y: rect.midY)
                             .allowsHitTesting(false)
                     }
-                    Rectangle()
-                        .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                        .frame(width: contentSize.width, height: contentSize.height)
-                        .allowsHitTesting(false)
 
                     if showGuides {
                         GuideLinesLayer(
@@ -171,11 +205,11 @@ struct CanvasView: View {
                     y: contentSize.height / 2 * zoom + panOffset.height
                 )
 
-                // Edge handles live in the outer, untransformed coordinate
-                // space (not inside the scaled/offset content) so their own
-                // drag translation stays stable regardless of zoom/pan.
-                rightEdgeHandle
-                bottomEdgeHandle
+                // Edge handles and board controls live in the outer,
+                // untransformed coordinate space (not inside the
+                // scaled/offset content) so their own drag translation stays
+                // stable regardless of zoom/pan.
+                boardControlsLayer
                 if showGuides {
                     RulerZones(
                         viewportSize: viewportSize,
@@ -201,9 +235,16 @@ struct CanvasView: View {
             }
             .onContinuousHover { phase in
                 switch phase {
-                case .active(let location): updateEdgeCursor(hovering: location)
-                case .ended: updateEdgeCursor(hovering: nil)
+                case .active(let location):
+                    updateEdgeCursor(hovering: location)
+                    hoveredBoardIndex = strictBoardIndex(at: canvasPoint(fromViewportPoint: location))
+                case .ended:
+                    updateEdgeCursor(hovering: nil)
+                    hoveredBoardIndex = nil
                 }
+            }
+            .contextMenu {
+                boardContextMenuContent
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
         }
@@ -232,11 +273,19 @@ struct CanvasView: View {
                 .help("Reset zoom and position")
                 guidesToggle
                 filenamesToggle
-                Button("Canvas Color", systemImage: "paintpalette.fill") {
+                Button("Canvas Colour", systemImage: "paintpalette.fill") {
                     showColorPanel()
                 }
                 .symbolRenderingMode(.multicolor)
-                .help("Set a custom canvas background color")
+                .help("Set the default board background colour — a board with its own colour (set via right-click) keeps that instead")
+                Button("Add Text Field", systemImage: "character.textbox") {
+                    addTextItem(isBox: false)
+                }
+                .help("Add a text field — one line, or more with Return")
+                Button("Add Text Box", systemImage: "text.rectangle") {
+                    addTextItem(isBox: true)
+                }
+                .help("Add a text box that wraps a paragraph")
                 Divider()
                 Button("Create Grid…", systemImage: "square.grid.3x2") {
                     showCreateGridSheet = true
@@ -250,11 +299,15 @@ struct CanvasView: View {
                 .help("Duplicate the selected image(s), each as a new \"-copy\" file added to the canvas")
                 Button("Crop", systemImage: "crop") {
                     if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
-                        cropModeItemID = id
+                        if document.items.first(where: { $0.id == id })?.kind == .text {
+                            textFormatItemID = id
+                        } else {
+                            cropModeItemID = id
+                        }
                     }
                 }
                 .disabled(document.selectedIDs.count != 1)
-                .help("Crop the selected image")
+                .help("Crop the selected image, or edit the selected text item")
                 Button("Delete", systemImage: "trash") {
                     performDelete()
                 }
@@ -272,11 +325,19 @@ struct CanvasView: View {
                 .disabled(document.items.isEmpty)
                 .help("Save visible area as an image")
                 Button("Save Whole Canvas…", systemImage: "square.and.arrow.down.on.square") {
-                    exportCanvas(cropToVisible: false)
+                    if document.boardSizes.count > 1 {
+                        showExportBoardChoice = true
+                    } else {
+                        exportCanvas(cropToVisible: false)
+                    }
                 }
                 .disabled(document.items.isEmpty)
                 .help("Save whole canvas as an image")
                 Divider()
+                Button("Board Size…", systemImage: "rectangle.arrowtriangle.2.outward") {
+                    showBoardSizeDialog = true
+                }
+                .help("Choose Auto or Fixed sizing for art boards")
                 Button("Open Folder…", systemImage: "folder") {
                     onChangeFolder()
                 }
@@ -301,12 +362,23 @@ struct CanvasView: View {
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             document.clearAllGuides()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openBoardSizeDialog)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            showBoardSizeDialog = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .exportPDF)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            showPDFExport = true
+        }
         .modifier(EditMenuCommands(
             document: document,
             hostWindow: hostWindow,
             cropModeItemID: $cropModeItemID,
+            textFormatItemID: $textFormatItemID,
             showRenameSheet: $showRenameSheet,
-            performDelete: performDelete
+            performDelete: performDelete,
+            insertTextField: { addTextItem(isBox: false) },
+            insertTextBox: { addTextItem(isBox: true) }
         ))
         .onReceive(NotificationCenter.default.publisher(for: .refreshAndReflow)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
@@ -354,6 +426,11 @@ struct CanvasView: View {
                 CropView(document: document, itemID: id, isPresented: cropSheetBinding)
             }
         }
+        .sheet(isPresented: textFormatSheetBinding) {
+            if let id = textFormatItemID {
+                TextFormatSheet(document: document, itemID: id, isPresented: textFormatSheetBinding)
+            }
+        }
         .sheet(isPresented: $showRenameSheet) {
             RenamePanelView(document: document, isPresented: $showRenameSheet)
         }
@@ -363,6 +440,24 @@ struct CanvasView: View {
                 document.createGrid(document.selectedIDs, spacing: spacing, isPercentage: isPercentage)
             } onCancel: {
                 showCreateGridSheet = false
+            }
+        }
+        .sheet(isPresented: $showBoardSizeDialog) {
+            BoardSizeDialog(document: document, isPresented: $showBoardSizeDialog)
+        }
+        .sheet(isPresented: $showPDFExport) {
+            PDFExportView(document: document, isPresented: $showPDFExport)
+        }
+        .sheet(isPresented: $showExportBoardChoice) {
+            ExportBoardChoiceView(document: document, isPresented: $showExportBoardChoice)
+        }
+        .sheet(item: moveBoardBinding) { identified in
+            let index = identified.value
+            MoveBoardDialog(boardIndex: index, boardCount: document.boardSizes.count) { target in
+                document.moveBoard(from: index, to: target)
+                moveBoardIndex = nil
+            } onCancel: {
+                moveBoardIndex = nil
             }
         }
         .alert("Can't Add Image", isPresented: Binding(
@@ -387,6 +482,157 @@ struct CanvasView: View {
             get: { cropModeItemID != nil },
             set: { if !$0 { cropModeItemID = nil } }
         )
+    }
+
+    private var textFormatSheetBinding: Binding<Bool> {
+        Binding(
+            get: { textFormatItemID != nil },
+            set: { if !$0 { textFormatItemID = nil } }
+        )
+    }
+
+    /// `.sheet(item:)` needs an `Identifiable` wrapper around a plain `Int`.
+    private var moveBoardBinding: Binding<IdentifiedInt?> {
+        Binding(
+            get: { moveBoardIndex.map(IdentifiedInt.init) },
+            set: { moveBoardIndex = $0?.value }
+        )
+    }
+
+    private func boardOrigin(for boardIndex: Int) -> CGPoint {
+        boardOrigins.indices.contains(boardIndex) ? boardOrigins[boardIndex] : .zero
+    }
+
+    /// Converts a point from `.onContinuousHover`'s outer "viewport" space
+    /// into the shared, zoomed/panned "canvas" content space — the inverse
+    /// of the transform the content `ZStack` itself renders under.
+    private func canvasPoint(fromViewportPoint point: CGPoint) -> CGPoint {
+        CGPoint(x: (point.x - panOffset.width) / zoom, y: (point.y - panOffset.height) / zoom)
+    }
+
+    /// Which board's own rect (strictly, not "nearest") a canvas-space point
+    /// falls within — nil if it's in a gap or outside every board. Distinct
+    /// from `document.boardIndex(at:)`, which always returns the closest
+    /// board and is used for drag/drop reassignment instead.
+    private func strictBoardIndex(at point: CGPoint) -> Int? {
+        let origins = boardOrigins
+        let sizes = boardSizesDisplay
+        for index in document.boardSizes.indices {
+            let origin = origins.indices.contains(index) ? origins[index] : .zero
+            let size = sizes.indices.contains(index) ? sizes[index] : .zero
+            if CGRect(origin: origin, size: size).contains(point) { return index }
+        }
+        return nil
+    }
+
+    /// The single board-management context menu's content — see
+    /// `hoveredBoardIndex`'s doc comment for why this replaced a
+    /// `.contextMenu` on each board background individually.
+    @ViewBuilder
+    private var boardContextMenuContent: some View {
+        if let index = hoveredBoardIndex {
+            Button("Board Colour…") { showBoardColorPanel(for: index) }
+            Button("Move to…") { moveBoardIndex = index }
+            Button("Delete Art Board") { document.deleteBoard(at: index) }
+                .disabled(document.boardSizes.count <= 1)
+        }
+    }
+
+    private var itemCardsLayer: some View {
+        ForEach(document.items) { item in
+            ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, boardOrigin: boardOrigin(for: item.boardIndex))
+        }
+    }
+
+    // MARK: - Art boards
+
+    @ViewBuilder
+    private var boardControlsLayer: some View {
+        if document.boardSizeMode == .auto {
+            ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
+                boardEdgeHandles(index)
+            }
+        }
+        ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
+            boardOrderLabel(index)
+        }
+        addBoardButton
+    }
+
+
+    /// The small order number below-left of each board, in the outer
+    /// (screen) coordinate space so it stays a fixed size regardless of zoom.
+    private func boardOrderLabel(_ index: Int) -> some View {
+        let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
+        let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+        let rect = screenRect(origin: origin, size: size)
+        return Text("\(index + 1)")
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .frame(width: 22, height: 22)
+            .background(Color.primary.opacity(0.08), in: Circle())
+            .position(x: rect.minX + 11, y: rect.maxY + boardControlsOffset)
+            .allowsHitTesting(false)
+    }
+
+    /// "+" circle below-right of the last board, appending a new one.
+    private var addBoardButton: some View {
+        let lastIndex = document.boardSizes.count - 1
+        let origin = boardOrigins.indices.contains(lastIndex) ? boardOrigins[lastIndex] : .zero
+        let size = boardSizesDisplay.indices.contains(lastIndex) ? boardSizesDisplay[lastIndex] : .zero
+        let rect = screenRect(origin: origin, size: size)
+        return Button {
+            document.addBoard()
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 22))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .position(x: rect.maxX - 11, y: rect.maxY + boardControlsOffset)
+        .help("Add an art board")
+    }
+
+    private func boardEdgeHandles(_ index: Int) -> some View {
+        let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
+        let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+        let rect = screenRect(origin: origin, size: size)
+        return Group {
+            rightEdgeHandle(boardIndex: index, rect: rect)
+            bottomEdgeHandle(boardIndex: index, rect: rect)
+        }
+    }
+
+    /// Opens the system colour panel seeded with the canvas's current
+    /// background (the system default when no custom colour has been set
+    /// yet), routing live changes back into `document.canvasColor` — the
+    /// shared default a board falls back to when it has no colour of its
+    /// own (see `boardContextMenuContent`'s "Board Colour…" for that).
+    private func showColorPanel() {
+        openColorPanel(current: document.canvasColor?.color ?? Color(nsColor: .textBackgroundColor)) { newColor in
+            document.canvasColor = RGBAColor(color: newColor)
+            document.save()
+        }
+    }
+
+    /// Same as `showColorPanel`, but sets just this one board's own
+    /// override instead of the document-wide default.
+    private func showBoardColorPanel(for index: Int) {
+        openColorPanel(current: document.boardColor(index, fallback: Color(nsColor: .textBackgroundColor))) { newColor in
+            document.setBoardColor(newColor, at: index)
+        }
+    }
+
+    /// Adds a new text item centered in whatever's currently visible, and
+    /// immediately opens it for editing so the user can start typing.
+    private func addTextItem(isBox: Bool) {
+        let centerGlobal = CGPoint(x: visibleCanvasRect.midX, y: visibleCanvasRect.midY)
+        let boardIndex = document.boardIndex(at: centerGlobal)
+        let origin = boardOrigin(for: boardIndex)
+        let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
+        let newID = document.addTextItem(isBox: isBox, at: localPoint, boardIndex: boardIndex)
+        textFormatItemID = newID
     }
 
     /// A single, stable button (no `.buttonStyle()` override, so it looks
@@ -415,16 +661,6 @@ struct CanvasView: View {
         .frame(width: 22, height: 22)
         .background(showFilenames ? Color.primary.opacity(0.12) : Color.clear, in: Circle())
         .help(showFilenames ? "Hide filenames" : "Show filenames under each image")
-    }
-
-    /// Opens the system color panel seeded with the canvas's current
-    /// background (the system default when no custom color has been set
-    /// yet), routing live changes back into `document.canvasColor`.
-    private func showColorPanel() {
-        openColorPanel(current: document.canvasColor?.color ?? Color(nsColor: .textBackgroundColor)) { newColor in
-            document.canvasColor = RGBAColor(color: newColor)
-            document.save()
-        }
     }
 
     /// Same as `showColorPanel`, but for the guide color (default blue when
@@ -468,7 +704,11 @@ struct CanvasView: View {
             }
             .onEnded { _ in
                 if let rect = marqueeRect {
-                    let matched = document.items.filter { $0.frame.intersects(rect) }
+                    let origins = boardOrigins
+                    let matched = document.items.filter { item in
+                        let origin = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex] : .zero
+                        return item.frame.offsetBy(dx: origin.x, dy: origin.y).intersects(rect)
+                    }
                     document.selectedIDs = Set(matched.map { $0.id })
                     document.selectedGuideID = nil
                 }
@@ -564,16 +804,15 @@ struct CanvasView: View {
         CGRect(x: 0, y: 0, width: rulerThickness, height: viewportSize.height)
     }
 
-    // MARK: - Canvas edge resize handles
+    // MARK: - Board edge resize handles
 
     private let edgeHitWidth: Double = 20
     /// Edges are inset away from the corners so the left/right and top/bottom
     /// hit regions never overlap and fight over the same drag.
     private var edgeInset: Double { edgeHitWidth * 2 }
 
-    private var rightEdgeHitRect: CGRect {
-        let rect = canvasScreenRect
-        return CGRect(
+    private func rightEdgeHitRect(_ rect: CGRect) -> CGRect {
+        CGRect(
             x: rect.maxX - edgeHitWidth / 2,
             y: rect.minY + edgeInset / 2,
             width: edgeHitWidth,
@@ -581,9 +820,8 @@ struct CanvasView: View {
         )
     }
 
-    private var bottomEdgeHitRect: CGRect {
-        let rect = canvasScreenRect
-        return CGRect(
+    private func bottomEdgeHitRect(_ rect: CGRect) -> CGRect {
+        CGRect(
             x: rect.minX + edgeInset / 2,
             y: rect.maxY - edgeHitWidth / 2,
             width: max(rect.width - edgeInset, 0),
@@ -591,26 +829,24 @@ struct CanvasView: View {
         )
     }
 
-    private var rightEdgeHandle: some View {
-        let rect = canvasScreenRect
-        return Rectangle()
+    private func rightEdgeHandle(boardIndex: Int, rect: CGRect) -> some View {
+        Rectangle()
             .fill(Color.secondary.opacity(0.001))
             .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 3))
             .frame(width: edgeHitWidth, height: max(rect.height - edgeInset, 0))
             .contentShape(Rectangle())
             .position(x: rect.maxX, y: rect.midY)
-            .gesture(rightEdgeDragGesture)
+            .gesture(rightEdgeDragGesture(boardIndex: boardIndex))
     }
 
-    private var bottomEdgeHandle: some View {
-        let rect = canvasScreenRect
-        return Rectangle()
+    private func bottomEdgeHandle(boardIndex: Int, rect: CGRect) -> some View {
+        Rectangle()
             .fill(Color.secondary.opacity(0.001))
             .overlay(Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 3))
             .frame(width: max(rect.width - edgeInset, 0), height: edgeHitWidth)
             .contentShape(Rectangle())
             .position(x: rect.midX, y: rect.maxY)
-            .gesture(bottomEdgeDragGesture)
+            .gesture(bottomEdgeDragGesture(boardIndex: boardIndex))
     }
 
     /// Single source of truth for the resize cursor: hit-tests the same
@@ -631,58 +867,75 @@ struct CanvasView: View {
         }
         if showGuides, topRulerHitRect.contains(location) || leftRulerHitRect.contains(location) {
             NSCursor.crosshair.set()
-        } else if rightEdgeHitRect.contains(location) {
-            NSCursor.resizeLeftRight.set()
-        } else if bottomEdgeHitRect.contains(location) {
-            NSCursor.resizeUpDown.set()
-        } else {
-            NSCursor.arrow.set()
+            return
         }
+        if document.boardSizeMode == .auto {
+            for index in document.boardSizes.indices {
+                let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
+                let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+                let rect = screenRect(origin: origin, size: size)
+                if rightEdgeHitRect(rect).contains(location) {
+                    NSCursor.resizeLeftRight.set()
+                    return
+                }
+                if bottomEdgeHitRect(rect).contains(location) {
+                    NSCursor.resizeUpDown.set()
+                    return
+                }
+            }
+        }
+        NSCursor.arrow.set()
     }
 
     /// Both edge gestures use the default (outer, screen-space) coordinate
     /// space deliberately — it's never itself rescaled/reoffset mid-gesture.
 
-    private var rightEdgeDragGesture: some Gesture {
+    private func rightEdgeDragGesture(boardIndex: Int) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
                 draggingEdge = .right
+                resizingBoardIndex = boardIndex
                 // Baseline is the edge's actual on-screen position
-                // (contentSize, which can exceed canvasWidth when images
-                // already extend past it), not the raw stored canvasWidth —
+                // (boardDisplaySize, which can exceed the stored size when
+                // images already extend past it), not the raw stored width —
                 // otherwise a drag has to first "catch up" to where the
                 // edge visually is before anything appears to move.
-                let baseline = widthDragBaseline ?? contentSize.width
+                let baseline = widthDragBaseline ?? document.boardDisplaySize(boardIndex).width
                 if widthDragBaseline == nil {
                     widthDragBaseline = baseline
-                    document.registerUndoCheckpoint(actionName: "Resize Canvas")
+                    document.registerUndoCheckpoint(actionName: "Resize Board")
                 }
                 let growth = value.translation.width / zoom
-                document.canvasWidth = min(max(baseline + growth, CanvasDocument.minCanvasDimension), CanvasDocument.maxCanvasDimension)
+                guard document.boardSizes.indices.contains(boardIndex) else { return }
+                document.boardSizes[boardIndex].width = min(max(baseline + growth, CanvasDocument.minCanvasDimension), CanvasDocument.maxCanvasDimension)
             }
             .onEnded { _ in
                 widthDragBaseline = nil
                 draggingEdge = nil
+                resizingBoardIndex = nil
                 updateEdgeCursor(hovering: nil)
                 document.save()
             }
     }
 
-    private var bottomEdgeDragGesture: some Gesture {
+    private func bottomEdgeDragGesture(boardIndex: Int) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
                 draggingEdge = .bottom
-                let baseline = heightDragBaseline ?? contentSize.height
+                resizingBoardIndex = boardIndex
+                let baseline = heightDragBaseline ?? document.boardDisplaySize(boardIndex).height
                 if heightDragBaseline == nil {
                     heightDragBaseline = baseline
-                    document.registerUndoCheckpoint(actionName: "Resize Canvas")
+                    document.registerUndoCheckpoint(actionName: "Resize Board")
                 }
                 let growth = value.translation.height / zoom
-                document.canvasHeight = min(max(baseline + growth, CanvasDocument.minCanvasDimension), CanvasDocument.maxCanvasDimension)
+                guard document.boardSizes.indices.contains(boardIndex) else { return }
+                document.boardSizes[boardIndex].height = min(max(baseline + growth, CanvasDocument.minCanvasDimension), CanvasDocument.maxCanvasDimension)
             }
             .onEnded { _ in
                 heightDragBaseline = nil
                 draggingEdge = nil
+                resizingBoardIndex = nil
                 updateEdgeCursor(hovering: nil)
                 document.save()
             }
@@ -783,7 +1036,7 @@ struct CanvasView: View {
                 }
             }
 
-            guard cropModeItemID == nil, !showRenameSheet else { return event }
+            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else { return event }
 
             // Space toggles a large preview of the single selected card,
             // closed again with Space or Escape — like Quick Look. Holding
@@ -797,8 +1050,9 @@ struct CanvasView: View {
                     previewItemID = nil
                     return nil
                 }
-                if document.selectedIDs.count == 1 {
-                    previewItemID = document.selectedIDs.first
+                if document.selectedIDs.count == 1, let id = document.selectedIDs.first,
+                   document.items.first(where: { $0.id == id })?.kind == .image {
+                    previewItemID = id
                     return nil
                 }
                 isSpaceDown = true
@@ -858,10 +1112,12 @@ struct CanvasView: View {
         keyMonitor = nil
     }
 
-    /// Moves every selected card by the same offset, clamped so the group's
-    /// leading/top edge can't cross 0 — same clamp used for drag-moves.
-    /// Registered as its own undo step per key press, matching how each
-    /// discrete drag-move is its own step.
+    /// Moves every selected card by the same offset, clamped so each card's
+    /// own (board-local) leading/top edge can't cross its board's 0 — same
+    /// clamp used for drag-moves. Registered as its own undo step per key
+    /// press, matching how each discrete drag-move is its own step. Doesn't
+    /// reassign boards (an arrow-key nudge never moves a card far enough to
+    /// cross a board boundary in practice).
     private func nudgeSelection(dx: Double, dy: Double) {
         let ids = document.selectedIDs
         let selected = document.items.filter { ids.contains($0.id) }
@@ -883,7 +1139,7 @@ struct CanvasView: View {
     private func installScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             guard event.window === hostWindow else { return event }
-            guard cropModeItemID == nil, !showRenameSheet else { return event }
+            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else { return event }
 
             if event.modifierFlags.contains(.command) {
                 let sensitivity: CGFloat = 0.0025
@@ -906,11 +1162,42 @@ struct CanvasView: View {
     }
 }
 
+/// `.sheet(item:)` wrapper for a plain board index.
+private struct IdentifiedInt: Identifiable {
+    let value: Int
+    var id: Int { value }
+}
+
+/// One art board's plain background rect. Right-click "Move to…"/"Delete
+/// Art Board" is handled by a single, shared context menu at the
+/// `CanvasView` level instead of one per board (see `hoveredBoardIndex`'s
+/// doc comment) — a `.contextMenu` attached to each of several
+/// visually-identical `ForEach` siblings could trigger the wrong sibling's
+/// menu on macOS.
+private struct BoardBackgroundView: View {
+    @ObservedObject var document: CanvasDocument
+    let index: Int
+    let origin: CGPoint
+    let size: CGSize
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            document.boardColor(index, fallback: Color(nsColor: .textBackgroundColor))
+            Rectangle().stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+        }
+        .frame(width: size.width, height: size.height)
+        .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+    }
+}
+
 private struct CanvasDropDelegate: DropDelegate {
     let document: CanvasDocument
 
     func performDrop(info: DropInfo) -> Bool {
         let location = info.location
+        let boardIndex = document.boardIndex(at: location)
+        let origin = document.boardOrigins().indices.contains(boardIndex) ? document.boardOrigins()[boardIndex] : .zero
+        let localPoint = CGPoint(x: location.x - origin.x, y: location.y - origin.y)
         let providers = info.itemProviders(for: [.fileURL])
         guard !providers.isEmpty else { return false }
 
@@ -918,7 +1205,7 @@ private struct CanvasDropDelegate: DropDelegate {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url, ImageFileSupport.isImage(url) else { return }
                 DispatchQueue.main.async {
-                    document.addImage(fromDropped: url, at: location)
+                    document.addImage(fromDropped: url, at: localPoint, boardIndex: boardIndex)
                 }
             }
         }
@@ -994,15 +1281,30 @@ private struct EditMenuCommands: ViewModifier {
     let document: CanvasDocument
     let hostWindow: NSWindow?
     @Binding var cropModeItemID: UUID?
+    @Binding var textFormatItemID: UUID?
     @Binding var showRenameSheet: Bool
     let performDelete: () -> Void
+    let insertTextField: () -> Void
+    let insertTextBox: () -> Void
 
     func body(content: Content) -> some View {
         content
+            .onReceive(NotificationCenter.default.publisher(for: .insertTextField)) { _ in
+                guard isKeyWindow else { return }
+                insertTextField()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .insertTextBox)) { _ in
+                guard isKeyWindow else { return }
+                insertTextBox()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .cropSelected)) { _ in
                 guard isKeyWindow else { return }
                 if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
-                    cropModeItemID = id
+                    if document.items.first(where: { $0.id == id })?.kind == .text {
+                        textFormatItemID = id
+                    } else {
+                        cropModeItemID = id
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .deleteSelected)) { _ in

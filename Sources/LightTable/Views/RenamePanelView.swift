@@ -12,8 +12,11 @@ struct RenamePanelView: View {
     @State private var applyCropsBeforeRenaming = false
     @State private var renameError: String?
 
+    /// Text items have no file to rename — excluded from both the sequence
+    /// count and the rename operations themselves, but stay untouched on
+    /// the canvas.
     private var orderedItems: [CanvasItem] {
-        document.readingOrder()
+        document.readingOrder().filter { $0.kind == .image }
     }
 
     private var plannedNames: [(item: CanvasItem, newName: String)] {

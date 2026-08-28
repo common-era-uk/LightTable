@@ -9,12 +9,25 @@ struct ImageCardView: View {
     @ObservedObject var document: CanvasDocument
     let itemID: UUID
     @Binding var cropModeItemID: UUID?
+    @Binding var textFormatItemID: UUID?
     let showFilenames: Bool
     let zoom: CGFloat
+    /// Where this item's board's local (0,0) lands in the shared,
+    /// multi-board display space — all interactive math below works in that
+    /// shared space (matching where guides and the drag gesture's own
+    /// "canvas" coordinate space live), only converting back to the item's
+    /// board-local storage at the point it's committed.
+    let boardOrigin: CGPoint
 
     @State private var liveRect: CGRect?
     @State private var dragBaseline: CGRect?
     @State private var groupResizeBBoxBaseline: CGRect?
+    @State private var groupResizeOriginsSnapshot: [CGPoint]?
+    /// Whether the in-progress single-item resize is a true proportional
+    /// scale (⌘ or ⌥ held on a text item, or any drag on an image) rather
+    /// than a text item's free independent-width/height resize — decides
+    /// whether `onEnded` also scales `fontSize`.
+    @State private var isTextScaleMode = false
     @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     private let minSize: Double = 40
@@ -30,7 +43,7 @@ struct ImageCardView: View {
             let rect = currentRect(for: item, isSelected: isSelected).offsetBy(dx: groupOffset.width, dy: groupOffset.height)
 
             ZStack(alignment: .topLeading) {
-                CroppedImageView(document: document, item: item, width: rect.width, height: rect.height)
+                cardContent(item: item, rect: rect)
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
@@ -42,7 +55,9 @@ struct ImageCardView: View {
                         y: shadowSettings.enabled ? shadowSettings.offset.height : 0
                     )
                     .gesture(moveGesture)
-                    .onTapGesture(count: 2) { cropModeItemID = itemID }
+                    .onTapGesture(count: 2) {
+                        if item.kind == .text { textFormatItemID = itemID } else { cropModeItemID = itemID }
+                    }
                     .onTapGesture { selectOnTap() }
                     .contextMenu {
                         if document.selectedIDs.contains(itemID), document.selectedIDs.count > 1 {
@@ -51,10 +66,10 @@ struct ImageCardView: View {
                             }
                             Divider()
                         }
-                        Button("Crop") {
+                        Button(item.kind == .text ? "Edit Text" : "Crop") {
                             let targets = contextMenuTargets()
                             if targets.count == 1, let id = targets.first {
-                                cropModeItemID = id
+                                if item.kind == .text { textFormatItemID = id } else { cropModeItemID = id }
                             }
                         }
                         .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -66,10 +81,12 @@ struct ImageCardView: View {
                             document.removeFromCanvas(contextMenuTargets())
                         }
                         .keyboardShortcut(.delete, modifiers: [])
-                        Button("Delete from Folder") {
-                            document.deleteItems(contextMenuTargets())
+                        if previewTargetsIncludeImage {
+                            Button("Delete from Folder") {
+                                document.deleteItems(contextMenuTargets())
+                            }
+                            .keyboardShortcut(.delete, modifiers: .command)
                         }
-                        .keyboardShortcut(.delete, modifiers: .command)
                         Divider()
                         Button("Bring Forward") {
                             document.bringForward(contextMenuTargets())
@@ -95,7 +112,7 @@ struct ImageCardView: View {
                     }
                 }
 
-                if showFilenames {
+                if showFilenames, item.kind == .image {
                     filenameLabel(item.filename, rect: rect)
                 }
             }
@@ -104,10 +121,20 @@ struct ImageCardView: View {
         }
     }
 
-    /// The card's rect before any group-move offset: its own live drag rect
-    /// while being actively resized, a live-preview scaled rect while it's a
-    /// bystander to another selected card's ⌘-group-resize, or just its
-    /// stored frame otherwise.
+    @ViewBuilder
+    private func cardContent(item: CanvasItem, rect: CGRect) -> some View {
+        if item.kind == .text {
+            TextItemContentView(item: item, width: rect.width, height: rect.height)
+        } else {
+            CroppedImageView(document: document, item: item, width: rect.width, height: rect.height)
+        }
+    }
+
+    /// The card's rect (in the shared display space) before any group-move
+    /// offset: its own live drag rect while being actively resized, a
+    /// live-preview scaled rect while it's a bystander to another selected
+    /// card's ⌘-group-resize, or just its stored (board-local) frame shifted
+    /// to its board's origin otherwise.
     private func currentRect(for item: CanvasItem, isSelected: Bool) -> CGRect {
         if let liveRect {
             return liveRect
@@ -116,9 +143,9 @@ struct ImageCardView: View {
            let sourceID = document.groupResizeSourceID, sourceID != itemID,
            let scale = document.groupResizeScale,
            let anchor = document.groupResizeAnchor {
-            return Self.transformedRect(item.frame, anchor: anchor, scale: scale)
+            return Self.transformedRect(item.frame.offsetBy(dx: boardOrigin.x, dy: boardOrigin.y), anchor: anchor, scale: scale)
         }
-        return item.frame
+        return item.frame.offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
     }
 
     private func filenameLabel(_ filename: String, rect: CGRect) -> some View {
@@ -180,10 +207,22 @@ struct ImageCardView: View {
         return [itemID]
     }
 
+    /// Whether `contextMenuTargets()` would include at least one image —
+    /// read-only preview of that same target set, so "Delete from Folder"
+    /// (which only means anything for a file) can be hidden when the whole
+    /// selection is text, without the side effect of actually selecting.
+    private var previewTargetsIncludeImage: Bool {
+        let ids = document.selectedIDs.contains(itemID) ? document.selectedIDs : [itemID]
+        return document.items.contains { ids.contains($0.id) && $0.kind == .image }
+    }
+
     /// Dragging a card that's part of the current selection moves the whole
     /// group together; dragging an unselected card selects just that one.
     /// Snapping is computed from this card's own edges (the one under the
-    /// cursor), then applied as one shared offset to the whole group.
+    /// cursor), then applied as one shared offset to the whole group. A card
+    /// dragged past its board's boundary lands on whichever board it's now
+    /// over, reassigned at the end of the drag (see `onEnded`) — not live,
+    /// so the whole group doesn't jitter as it crosses.
     private var moveGesture: some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
             .onChanged { value in
@@ -191,17 +230,29 @@ struct ImageCardView: View {
                     document.selectedIDs = [itemID]
                     document.selectedGuideID = nil
                 }
-                let baseline = item?.frame ?? .zero
+                let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 document.groupDragOffset = snappedOffset(clampedGroupOffset(value.translation), baseline: baseline)
             }
             .onEnded { value in
                 let ids = document.selectedIDs
-                let baseline = item?.frame ?? .zero
+                let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 let offset = snappedOffset(clampedGroupOffset(value.translation), baseline: baseline)
                 document.registerUndoCheckpoint(actionName: "Move")
-                document.updateItems(ids) { current in
-                    current.x += offset.width
-                    current.y += offset.height
+
+                let origins = document.boardOrigins()
+                let sizes = document.boardSizes.indices.map { document.boardDisplaySize($0) }
+                for id in ids {
+                    document.updateItem(id) { current in
+                        let oldOrigin = origins.indices.contains(current.boardIndex) ? origins[current.boardIndex] : .zero
+                        let globalX = current.x + oldOrigin.x + offset.width
+                        let globalY = current.y + oldOrigin.y + offset.height
+                        let globalCenter = CGPoint(x: globalX + current.width / 2, y: globalY + current.height / 2)
+                        let newBoard = CanvasDocument.boardIndex(at: globalCenter, origins: origins, sizes: sizes)
+                        let newOrigin = origins.indices.contains(newBoard) ? origins[newBoard] : .zero
+                        current.boardIndex = newBoard
+                        current.x = globalX - newOrigin.x
+                        current.y = globalY - newOrigin.y
+                    }
                 }
                 document.groupDragOffset = .zero
                 document.save()
@@ -216,25 +267,45 @@ struct ImageCardView: View {
         let threshold = 8.0 / max(zoom, 0.01)
 
         var dx = offset.width
-        if let match = Self.nearestGuideMatch(document.verticalGuides, edges: [liveRect.minX, liveRect.maxX], threshold: threshold) {
+        if let match = Self.nearestGuideMatch(document.verticalGuides.map(\.position) + boardEdgeXPositions, edges: [liveRect.minX, liveRect.maxX], threshold: threshold) {
             dx += match.guidePosition - match.edgeValue
         }
         var dy = offset.height
-        if let match = Self.nearestGuideMatch(document.horizontalGuides, edges: [liveRect.minY, liveRect.maxY], threshold: threshold) {
+        if let match = Self.nearestGuideMatch(document.horizontalGuides.map(\.position) + boardEdgeYPositions, edges: [liveRect.minY, liveRect.maxY], threshold: threshold) {
             dy += match.guidePosition - match.edgeValue
         }
         return CGSize(width: dx, height: dy)
     }
 
-    /// The closest (guide, edge) pairing within `threshold`, or nil if none
-    /// of `edges` comes close enough to any guide.
-    private static func nearestGuideMatch(_ guides: [Guide], edges: [Double], threshold: Double) -> (edgeValue: Double, guidePosition: Double)? {
+    /// This card's own board's rect in the shared display space — used so a
+    /// move or resize can snap to the board's own edges, not just guides
+    /// (e.g. scaling an image to exactly fill its board top-to-bottom).
+    private var currentBoardRect: CGRect {
+        guard let item else { return .zero }
+        return CGRect(origin: boardOrigin, size: document.boardDisplaySize(item.boardIndex))
+    }
+
+    private var boardEdgeXPositions: [Double] {
+        let rect = currentBoardRect
+        return [rect.minX, rect.maxX]
+    }
+
+    private var boardEdgeYPositions: [Double] {
+        let rect = currentBoardRect
+        return [rect.minY, rect.maxY]
+    }
+
+    /// The closest (position, edge) pairing within `threshold`, or nil if
+    /// none of `edges` comes close enough to any candidate `positions` —
+    /// guide positions and board-edge positions are merged into one list by
+    /// the caller, so both snap the same way.
+    private static func nearestGuideMatch(_ positions: [Double], edges: [Double], threshold: Double) -> (edgeValue: Double, guidePosition: Double)? {
         var best: (edgeValue: Double, guidePosition: Double, distance: Double)?
-        for guide in guides {
+        for position in positions {
             for edge in edges {
-                let distance = abs(edge - guide.position)
+                let distance = abs(edge - position)
                 if distance <= threshold, best == nil || distance < best!.distance {
-                    best = (edge, guide.position, distance)
+                    best = (edge, position, distance)
                 }
             }
         }
@@ -242,20 +313,34 @@ struct ImageCardView: View {
         return (best.edgeValue, best.guidePosition)
     }
 
-    /// Clamps a group move so no selected card's left or top edge can cross
-    /// 0 — the canvas only auto-extends on the right/bottom, so going
-    /// negative would push cards permanently off-screen. The whole group is
-    /// clamped together (by whichever card would hit the edge first) rather
+    /// Clamps a group move on two different bases per axis:
+    /// - Horizontally, each card still can't cross its *own* board's local
+    ///   left edge — X never changes which board a card is on, so a board's
+    ///   own rect (always at local x=0) is a hard, per-board bound, exactly
+    ///   like the original single-canvas rule.
+    /// - Vertically, the bound is the *global* top of the whole stacked
+    ///   canvas (board 1's own top edge), not each card's own board's local
+    ///   top — a card sitting on board 2 needs to stay draggable all the way
+    ///   up past board 1's top edge (crossing into board 1 along the way),
+    ///   not just to the top of board 2's own local space.
+    ///
+    /// Either way, nothing auto-extends up or to the left, so going past
+    /// either bound would push a card permanently off. The whole group is
+    /// clamped together (by whichever card would hit a bound first) rather
     /// than clamping each card individually, which would distort the group.
     private func clampedGroupOffset(_ translation: CGSize) -> CGSize {
         let ids = document.selectedIDs.contains(itemID) ? document.selectedIDs : [itemID]
         let selected = document.items.filter { ids.contains($0.id) }
         guard !selected.isEmpty else { return translation }
+        let origins = document.boardOrigins()
+        func globalOriginY(of item: CanvasItem) -> Double {
+            origins.indices.contains(item.boardIndex) ? origins[item.boardIndex].y : 0
+        }
         let minX = selected.map { $0.x }.min() ?? 0
-        let minY = selected.map { $0.y }.min() ?? 0
+        let minGlobalY = selected.map { $0.y + globalOriginY(of: $0) }.min() ?? 0
         return CGSize(
             width: max(translation.width, -minX),
-            height: max(translation.height, -minY)
+            height: max(translation.height, -minGlobalY)
         )
     }
 
@@ -267,10 +352,13 @@ struct ImageCardView: View {
     /// anchor point — the group bounding box's fixed corner, or its center
     /// if ⌥ is also held — so gaps between cards scale proportionally
     /// instead of each card drifting from its own independent anchor.
+    /// Resizing never moves a card to a different board (only a plain drag
+    /// does), so all of this works in the shared display space and just
+    /// subtracts this card's own (unchanged) board origin back out at commit.
     private func cornerDragGesture(_ corner: CardCorner) -> some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
             .onChanged { value in
-                let baseline = dragBaseline ?? (item?.frame ?? .zero)
+                let baseline = dragBaseline ?? (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 if dragBaseline == nil { dragBaseline = baseline }
 
                 let isCenterScale = NSEvent.modifierFlags.contains(.option)
@@ -279,7 +367,9 @@ struct ImageCardView: View {
                     && document.selectedIDs.contains(itemID)
 
                 if isGroupScale {
-                    let bboxBaseline = groupResizeBBoxBaseline ?? Self.boundingBox(of: document.selectedIDs, items: document.items, fallback: baseline)
+                    let origins = groupResizeOriginsSnapshot ?? document.boardOrigins()
+                    if groupResizeOriginsSnapshot == nil { groupResizeOriginsSnapshot = origins }
+                    let bboxBaseline = groupResizeBBoxBaseline ?? Self.boundingBox(of: document.selectedIDs, items: document.items, origins: origins, fallback: baseline)
                     if groupResizeBBoxBaseline == nil { groupResizeBBoxBaseline = bboxBaseline }
 
                     let selected = document.items.filter { document.selectedIDs.contains($0.id) }
@@ -301,37 +391,67 @@ struct ImageCardView: View {
                     liveRect = Self.transformedRect(baseline, anchor: anchor, scale: scale)
                 } else {
                     groupResizeBBoxBaseline = nil
+                    groupResizeOriginsSnapshot = nil
                     document.groupResizeScale = nil
                     document.groupResizeAnchor = nil
                     document.groupResizeSourceID = nil
-                    liveRect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, isCenterScale: isCenterScale)
+
+                    let isTextItem = item?.kind == .text
+                    let isCommandScale = NSEvent.modifierFlags.contains(.command)
+                    if isTextItem, !isCenterScale, !isCommandScale {
+                        // Plain drag on a text item: reshape the box freely
+                        // (independent width/height) rather than locking
+                        // aspect ratio — for accommodating wrapped text.
+                        isTextScaleMode = false
+                        liveRect = freeResizeRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height)
+                    } else {
+                        // ⌘ or ⌥ on a text item is a true proportional scale
+                        // (font size included, applied in onEnded below) —
+                        // same math images always use.
+                        isTextScaleMode = isTextItem
+                        liveRect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, isCenterScale: isCenterScale)
+                    }
                 }
             }
             .onEnded { _ in
                 if let scale = document.groupResizeScale, let anchor = document.groupResizeAnchor {
                     document.registerUndoCheckpoint(actionName: "Scale Selection")
+                    let origins = groupResizeOriginsSnapshot ?? document.boardOrigins()
                     for id in document.selectedIDs {
                         guard let target = document.items.first(where: { $0.id == id }) else { continue }
-                        let transformed = Self.transformedRect(target.frame, anchor: anchor, scale: scale)
+                        let origin = origins.indices.contains(target.boardIndex) ? origins[target.boardIndex] : .zero
+                        let globalFrame = target.frame.offsetBy(dx: origin.x, dy: origin.y)
+                        let transformed = Self.transformedRect(globalFrame, anchor: anchor, scale: scale)
+                        let localFrame = transformed.offsetBy(dx: -origin.x, dy: -origin.y)
                         document.updateItem(id) { current in
-                            current.x = transformed.minX
-                            current.y = transformed.minY
-                            current.width = transformed.width
-                            current.height = transformed.height
+                            current.x = localFrame.minX
+                            current.y = localFrame.minY
+                            current.width = localFrame.width
+                            current.height = localFrame.height
+                            if current.kind == .text {
+                                current.fontSize = max(current.fontSize * scale, 4)
+                            }
                         }
                     }
                 } else if let rect = liveRect {
                     document.registerUndoCheckpoint(actionName: "Resize")
+                    let localRect = rect.offsetBy(dx: -boardOrigin.x, dy: -boardOrigin.y)
+                    let fontScale = (isTextScaleMode && dragBaseline != nil && dragBaseline!.height > 0) ? rect.height / dragBaseline!.height : 1
                     document.updateItem(itemID) { current in
-                        current.x = rect.minX
-                        current.y = rect.minY
-                        current.width = rect.width
-                        current.height = rect.height
+                        current.x = localRect.minX
+                        current.y = localRect.minY
+                        current.width = localRect.width
+                        current.height = localRect.height
+                        if isTextScaleMode {
+                            current.fontSize = max(current.fontSize * fontScale, 4)
+                        }
                     }
                 }
                 liveRect = nil
                 dragBaseline = nil
+                isTextScaleMode = false
                 groupResizeBBoxBaseline = nil
+                groupResizeOriginsSnapshot = nil
                 document.groupResizeScale = nil
                 document.groupResizeAnchor = nil
                 document.groupResizeSourceID = nil
@@ -339,11 +459,44 @@ struct ImageCardView: View {
             }
     }
 
-    /// The union of every selected card's stored frame, captured once at the
-    /// start of a group-scale drag so the whole selection scales from one
-    /// stable rectangle rather than one that shifts as cards are transformed.
-    private static func boundingBox(of ids: Set<UUID>, items: [CanvasItem], fallback: CGRect) -> CGRect {
-        let frames = items.filter { ids.contains($0.id) }.map(\.frame)
+    /// Resizes `baseline` from `corner`, changing width and height
+    /// independently rather than locking aspect ratio — used for a plain
+    /// (no-modifier) drag on a text item, so its box can be reshaped freely
+    /// to accommodate wrapped text. Growing from a left/top corner is
+    /// capped so the new left/top edge never crosses 0, same as the
+    /// aspect-locked version.
+    private func freeResizeRect(baseline: CGRect, corner: CardCorner, dx: Double, dy: Double) -> CGRect {
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+
+        var minX = baseline.minX
+        var maxX = baseline.maxX
+        var minY = baseline.minY
+        var maxY = baseline.maxY
+
+        if isRight {
+            maxX = max(baseline.maxX + dx, baseline.minX + minSize)
+        } else {
+            minX = min(max(baseline.minX + dx, 0), baseline.maxX - minSize)
+        }
+        if isBottom {
+            maxY = max(baseline.maxY + dy, baseline.minY + minSize)
+        } else {
+            minY = min(max(baseline.minY + dy, 0), baseline.maxY - minSize)
+        }
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// The union of every selected card's frame in the shared display space
+    /// (each offset by its own board's origin), captured once at the start
+    /// of a group-scale drag so the whole selection scales from one stable
+    /// rectangle rather than one that shifts as cards are transformed.
+    private static func boundingBox(of ids: Set<UUID>, items: [CanvasItem], origins: [CGPoint], fallback: CGRect) -> CGRect {
+        let frames = items.filter { ids.contains($0.id) }.map { item -> CGRect in
+            let origin = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex] : .zero
+            return item.frame.offsetBy(dx: origin.x, dy: origin.y)
+        }
         guard let first = frames.first else { return fallback }
         return frames.dropFirst().reduce(first) { $0.union($1) }
     }
@@ -457,8 +610,8 @@ struct ImageCardView: View {
         let freeX = isRight ? baseline.minX + baseline.width * currentScale : baseline.maxX - baseline.width * currentScale
         let freeY = isBottom ? baseline.minY + baseline.height * currentScale : baseline.maxY - baseline.height * currentScale
 
-        let vMatch = Self.nearestGuideMatch(document.verticalGuides, edges: [freeX], threshold: threshold)
-        let hMatch = Self.nearestGuideMatch(document.horizontalGuides, edges: [freeY], threshold: threshold)
+        let vMatch = Self.nearestGuideMatch(document.verticalGuides.map(\.position) + boardEdgeXPositions, edges: [freeX], threshold: threshold)
+        let hMatch = Self.nearestGuideMatch(document.horizontalGuides.map(\.position) + boardEdgeYPositions, edges: [freeY], threshold: threshold)
         guard vMatch != nil || hMatch != nil else { return nil }
 
         let useVertical: Bool

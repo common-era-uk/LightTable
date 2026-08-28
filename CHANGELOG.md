@@ -2,6 +2,27 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.1.0 — 2026-08-28
+
+- Added art boards: a canvas can now hold multiple boards, stacked vertically, each with its own images and layout. Add one with the "+" button below the last board; right-click a board's background for "Move to…" (type a target position) or "Delete Art Board" (files stay in the folder, same as Remove from Canvas). Drag a card past a board's edge and it lands on whichever board it's now over.
+- Added "Board Size…" (toolbar and File menu) to choose between **Auto** — each board sizes itself to fit its own content, the original single-canvas behavior — and **Fixed**, where every board shares one size (inches, cm, or pixels) and never resizes itself; content that no longer fits simply sits past the edge on screen until it's clipped at PDF export, like a real print page. Includes common presets (US Letter, A4, A3, Instagram Post/Story, and a 10×10 in square).
+- Added File > "Export as PDF…" — pick which art boards to include and a resolution (dpi), and each becomes one page, in order.
+- Opening an existing single-canvas `.lt` file automatically becomes a one-board document (Board 1), sized to whichever is larger of its old canvas size or its actual content — nothing already on the canvas gets clipped.
+- Fixed dragging a card back up across a board boundary (e.g. from board 2 to board 1) sometimes being blocked at the boundary instead of crossing it.
+- Added a "1920×1080 px (HD)" preset to Board Size.
+- Fixed switching board size mode from Fixed back to Auto and then back to Fixed again collapsing the view down to a single board — every board actually survived, but shared a duplicate identity that made SwiftUI display only one.
+- Fixed right-clicking a board and choosing "Move to…"/"Delete Art Board" sometimes acting on a different board than the one that was clicked — replaced the per-board right-click menu with a single shared one that tracks the board actually under the cursor.
+- Fixed "Export as PDF…" producing correctly-counted but entirely blank pages — the PDF context's own default page size was zero, silently overriding every page's actual size.
+- Fixed a Fixed-size board auto-extending anyway when an image was dragged past its edge — Fixed boards now stay locked to exactly their configured size.
+- "Save Whole Canvas…" now offers a choice when there's more than one art board — save a single board, or every board at once as separate files — instead of always flattening the whole stack into one image.
+- Cards and the crop box now snap to their board's own edges during move/resize, the same way they already snap to guides.
+- Added text fields and text boxes — toolbar's "Add Text Field"/"Add Text Box" (also in Edit menu, at the bottom) drop one in, opening a formatting sheet with a live-formatted editor: typeface and size via the system Font panel, Bold/Italic, alignment, colour, letter spacing, and line height. A field doesn't wrap (only an explicit Return breaks a line); a box wraps to its width like a paragraph. Text items behave like image cards in every other way — draggable, same right-click menu, same layering/z-index, same undo — except a plain drag reshapes a text item's box freely (independent width/height), while holding ⌘ or ⌥ scales it proportionally, font size included. Text items don't participate in Create Grid or any file-based operation (rename, refresh from disk, etc.), since they have no file on disk.
+- PDF export resolution is now a dropdown (72/96/150/300 dpi) instead of a free-typed number.
+- Added standard Cut/Copy/Paste back to the Edit menu (⌘X/⌘C/⌘V) — needed for editing text field/box content; they'd been removed earlier since the canvas itself had no clipboard use for them.
+- Reorganized the File menu: New Window, Open…, Open Recent, Set Art Board Size…, Save As…, Export as PDF…, Package…, Bulk Rename…, Close, Close All, in that order.
+- Added per-board background colours — right-click a board's background for "Board Colour…" to set just that one board. The toolbar's "Canvas Colour" button now sets the shared default that a board without its own colour falls back to, instead of one color for the whole canvas.
+- Changed "color" to "colour" throughout the app's UI text (UK English).
+
 ## 1.0.10 — 2026-08-27
 
 - Added "Create Grid" — select two or more images and click the toolbar's Create Grid button (SF icon, before Duplicate) or use View > "Create Grid…" to arrange them into a clean grid with configurable spacing (points or percentage). Images already sitting in a rough row are kept together; rows only merge or split where the canvas width actually requires it, and all images are resized to a shared height. The View menu item is disabled unless 2+ images are selected.
