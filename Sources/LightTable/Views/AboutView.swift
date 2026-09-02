@@ -47,6 +47,10 @@ struct AboutView: View {
         ("Canvas files (.lt)", "Each folder can hold one or more .lt canvas files — visible, double-clickable documents storing your layout, crops, and guides. Use File > Save As… to save a copy of the current canvas under a new name in the same folder, handy for trying a different sequence or arrangement of the same images without disturbing the original."),
         ("Layer images", "Select one or more images and use Edit > Bring Forward / Send Backward (⌘] / ⌘[) to move them one step, or Bring to Front / Send to Back (⇧⌘] / ⇧⌘[) to move them all the way. Right-click a card for the same options, plus Crop, Duplicate, and Remove/Delete."),
         ("Create Grid", "Select two or more images and click the toolbar's Create Grid button (or View > Create Grid…) to arrange them into a clean grid. Set the spacing between images in points or as a percentage. Images already in a rough row stay together — the layout only merges or splits rows where the canvas width actually requires it, and all images are resized to a shared height."),
+        ("Replace an image", "Drag a file from Finder directly onto an existing image card to replace its content, keeping the same position and size (crop is reset). The card highlights while a file is dragged over it. Dropping several files onto empty canvas at once cascades them instead of stacking them on top of each other."),
+        ("Cut, copy & paste", "⌘X/⌘C/⌘V now work on the canvas selection, not just inside text fields. Copy duplicates the selected images and text; Cut moves them, ready to paste elsewhere — even onto a different art board or into a different open canvas."),
+        ("Straight-line drag", "Hold ⇧ while dragging an image or text item to restrict its movement to a straight horizontal or vertical line."),
+        ("Overset text", "A text box whose content no longer fits its frame shows a small red \"…\" badge over its bottom-right corner."),
     ]
 
     private let exportingTips: [(title: String, detail: String)] = [

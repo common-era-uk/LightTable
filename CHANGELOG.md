@@ -2,7 +2,7 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
-## 1.2.0 — 2026-09-02
+## 1.1.1 — 2026-09-02
 
 - Dropping multiple files from Finder at once now cascades them diagonally instead of stacking every card on top of the same spot.
 - Dragging a file from Finder directly onto an existing image card now replaces its content in place (same position and size, crop reset) — the target card highlights with a bounding box while the file is dragged over it. The old file is removed from the canvas, not trashed; it stays on disk unless another card still uses it.
