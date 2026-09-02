@@ -27,23 +27,37 @@ struct LightTableApp: App {
                 }
             }
             CommandGroup(replacing: .pasteboard) {
-                // Standard text-editing actions, dispatched up the responder
-                // chain the normal AppKit way — lets ⌘X/⌘C/⌘V work in any
-                // text field/editor (e.g. the text item formatting sheet)
-                // even though the canvas itself has no clipboard concept of
-                // its own. This group otherwise replaces Cut/Copy/Paste
-                // entirely, so without these, focusing a text field had no
-                // menu-level Copy/Paste at all.
+                // Routes to the standard AppKit responder-chain text actions
+                // when a text field/editor has focus (e.g. the text item
+                // formatting sheet, the rename panel), or to the canvas's
+                // own item-level cut/copy/paste otherwise — letting ⌘X/⌘C/⌘V
+                // duplicate, move, or copy-across-boards the current image
+                // or text card selection. This group otherwise replaces
+                // Cut/Copy/Paste entirely, so without this routing, focusing
+                // a text field had no menu-level Copy/Paste at all, and
+                // selecting a canvas item had none either.
                 Button("Cut") {
-                    NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+                    if isTextEditingFocused {
+                        NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: nil)
+                    } else {
+                        NotificationCenter.default.post(name: .cutSelected, object: nil)
+                    }
                 }
                 .keyboardShortcut("x", modifiers: .command)
                 Button("Copy") {
-                    NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                    if isTextEditingFocused {
+                        NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: nil)
+                    } else {
+                        NotificationCenter.default.post(name: .copySelected, object: nil)
+                    }
                 }
                 .keyboardShortcut("c", modifiers: .command)
                 Button("Paste") {
-                    NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+                    if isTextEditingFocused {
+                        NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil)
+                    } else {
+                        NotificationCenter.default.post(name: .pasteSelected, object: nil)
+                    }
                 }
                 .keyboardShortcut("v", modifiers: .command)
                 Divider()
@@ -216,6 +230,15 @@ struct LightTableApp: App {
             PreviewBackgroundSettingsView()
         }
         .windowResizability(.contentSize)
+    }
+
+    /// Whether the key window's first responder is a text-editing view (a
+    /// `TextField`/`TextEditor`'s field editor is an `NSTextView` on macOS,
+    /// same as a plain `NSTextField`'s) — decides whether Cut/Copy/Paste
+    /// should dispatch the standard text action or act on the canvas
+    /// selection instead.
+    private var isTextEditingFocused: Bool {
+        NSApp.keyWindow?.firstResponder is NSTextView
     }
 
     /// File > Open… — always opens in a new window (matching "New Window"

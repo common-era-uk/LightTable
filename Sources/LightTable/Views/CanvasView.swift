@@ -378,7 +378,8 @@ struct CanvasView: View {
             showRenameSheet: $showRenameSheet,
             performDelete: performDelete,
             insertTextField: { addTextItem(isBox: false) },
-            insertTextBox: { addTextItem(isBox: true) }
+            insertTextBox: { addTextItem(isBox: true) },
+            performPaste: performPaste
         ))
         .onReceive(NotificationCenter.default.publisher(for: .refreshAndReflow)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
@@ -633,6 +634,16 @@ struct CanvasView: View {
         let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
         let newID = document.addTextItem(isBox: isBox, at: localPoint, boardIndex: boardIndex)
         textFormatItemID = newID
+    }
+
+    /// Pastes the clipboard centered in whatever's currently visible, same
+    /// placement convention as `addTextItem`.
+    private func performPaste() {
+        let centerGlobal = CGPoint(x: visibleCanvasRect.midX, y: visibleCanvasRect.midY)
+        let boardIndex = document.boardIndex(at: centerGlobal)
+        let origin = boardOrigin(for: boardIndex)
+        let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
+        document.pasteFromClipboard(at: localPoint, boardIndex: boardIndex)
     }
 
     /// A single, stable button (no `.buttonStyle()` override, so it looks
@@ -1201,11 +1212,16 @@ private struct CanvasDropDelegate: DropDelegate {
         let providers = info.itemProviders(for: [.fileURL])
         guard !providers.isEmpty else { return false }
 
-        for provider in providers {
+        // Multiple files dropped at once cascade diagonally from the drop
+        // point (by drop order, not load-completion order, since providers
+        // load asynchronously and out of order) instead of landing on top of
+        // one another.
+        for (index, provider) in providers.enumerated() {
+            let cascadedPoint = CGPoint(x: localPoint.x + CGFloat(index) * 32, y: localPoint.y + CGFloat(index) * 32)
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url, ImageFileSupport.isImage(url) else { return }
                 DispatchQueue.main.async {
-                    document.addImage(fromDropped: url, at: localPoint, boardIndex: boardIndex)
+                    document.addImage(fromDropped: url, at: cascadedPoint, boardIndex: boardIndex)
                 }
             }
         }
@@ -1286,9 +1302,22 @@ private struct EditMenuCommands: ViewModifier {
     let performDelete: () -> Void
     let insertTextField: () -> Void
     let insertTextBox: () -> Void
+    let performPaste: () -> Void
 
     func body(content: Content) -> some View {
         content
+            .onReceive(NotificationCenter.default.publisher(for: .cutSelected)) { _ in
+                guard isKeyWindow else { return }
+                document.cutSelectedToClipboard()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .copySelected)) { _ in
+                guard isKeyWindow else { return }
+                document.copySelectedToClipboard()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pasteSelected)) { _ in
+                guard isKeyWindow else { return }
+                performPaste()
+            }
             .onReceive(NotificationCenter.default.publisher(for: .insertTextField)) { _ in
                 guard isKeyWindow else { return }
                 insertTextField()

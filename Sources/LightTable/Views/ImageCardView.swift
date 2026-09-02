@@ -28,6 +28,10 @@ struct ImageCardView: View {
     /// than a text item's free independent-width/height resize — decides
     /// whether `onEnded` also scales `fontSize`.
     @State private var isTextScaleMode = false
+    /// Whether a file dragged from Finder is currently hovering this card —
+    /// drawn as a highlighted bounding box so the drop-to-replace target is
+    /// obvious before the file is actually dropped.
+    @State private var isReplaceDropTargeted = false
     @ObservedObject private var shadowSettings = ShadowSettings.shared
 
     private let minSize: Double = 40
@@ -124,9 +128,32 @@ struct ImageCardView: View {
     @ViewBuilder
     private func cardContent(item: CanvasItem, rect: CGRect) -> some View {
         if item.kind == .text {
-            TextItemContentView(item: item, width: rect.width, height: rect.height)
+            TextItemContentView(item: item, width: rect.width, height: rect.height, showOverflowIndicator: true)
         } else {
             CroppedImageView(document: document, item: item, width: rect.width, height: rect.height)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.accentColor, lineWidth: 4)
+                        .opacity(isReplaceDropTargeted ? 1 : 0)
+                )
+                .background(
+                    Color.accentColor.opacity(isReplaceDropTargeted ? 0.15 : 0)
+                )
+                .onDrop(of: [.fileURL], isTargeted: $isReplaceDropTargeted) { providers in
+                    // Dropping a file directly onto an existing image card
+                    // replaces its content in place (same size/position)
+                    // instead of adding a new card — this handler, nested
+                    // inside the canvas's own file-drop target, takes
+                    // priority over it whenever the drop lands on a card.
+                    guard let provider = providers.first else { return false }
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url, ImageFileSupport.isImage(url) else { return }
+                        DispatchQueue.main.async {
+                            document.replaceImage(itemID, with: url)
+                        }
+                    }
+                    return true
+                }
         }
     }
 
@@ -231,12 +258,12 @@ struct ImageCardView: View {
                     document.selectedGuideID = nil
                 }
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
-                document.groupDragOffset = snappedOffset(clampedGroupOffset(value.translation), baseline: baseline)
+                document.groupDragOffset = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
             }
             .onEnded { value in
                 let ids = document.selectedIDs
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
-                let offset = snappedOffset(clampedGroupOffset(value.translation), baseline: baseline)
+                let offset = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
                 document.registerUndoCheckpoint(actionName: "Move")
 
                 let origins = document.boardOrigins()
@@ -257,6 +284,19 @@ struct ImageCardView: View {
                 document.groupDragOffset = .zero
                 document.save()
             }
+    }
+
+    /// Holding ⇧ while dragging restricts movement to a straight horizontal
+    /// or vertical line — whichever axis has moved further from the drag's
+    /// start dominates, re-evaluated on every update so it tracks the
+    /// gesture's actual direction rather than locking to an initial guess.
+    private func axisConstrained(_ translation: CGSize) -> CGSize {
+        guard NSEvent.modifierFlags.contains(.shift) else { return translation }
+        if abs(translation.width) >= abs(translation.height) {
+            return CGSize(width: translation.width, height: 0)
+        } else {
+            return CGSize(width: 0, height: translation.height)
+        }
     }
 
     /// Pulls `offset` so `baseline`'s edges land exactly on a nearby guide

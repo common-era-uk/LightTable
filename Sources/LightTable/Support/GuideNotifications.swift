@@ -28,4 +28,7 @@ extension Notification.Name {
     static let exportPDF = Notification.Name("LightTable.exportPDF")
     static let insertTextField = Notification.Name("LightTable.insertTextField")
     static let insertTextBox = Notification.Name("LightTable.insertTextBox")
+    static let cutSelected = Notification.Name("LightTable.cutSelected")
+    static let copySelected = Notification.Name("LightTable.copySelected")
+    static let pasteSelected = Notification.Name("LightTable.pasteSelected")
 }

@@ -26,6 +26,31 @@ struct RGBAColor: Codable, Equatable {
     }
 }
 
+/// A single, app-wide clipboard for canvas items — deliberately not routed
+/// through `NSPasteboard`, since what's being carried (a `CanvasItem` plus,
+/// for images, a reference to its file in a specific document's folder) has
+/// no useful representation outside LightTable itself. A plain shared
+/// singleton is enough to support copy/cut in one document's window and
+/// paste in another's, same as `NSPasteboard` would, without the
+/// serialization overhead.
+final class CanvasClipboard {
+    static let shared = CanvasClipboard()
+    private init() {}
+
+    struct Payload {
+        enum Mode { case copy, cut }
+        var mode: Mode
+        /// A value-type snapshot taken at copy/cut time — later edits to the
+        /// original item (or its removal, in the cut case) don't affect it.
+        var items: [CanvasItem]
+        /// Where `items`' image files actually live, so a paste — possibly
+        /// into a different document/window — can find them.
+        var sourceFolderURL: URL
+    }
+
+    var payload: Payload?
+}
+
 /// A single ruler guide. `position` is an X (vertical guide) or Y
 /// (horizontal guide) coordinate in the shared multi-board display space
 /// (see `CanvasDocument.boardOrigins`) — which array it's stored in
@@ -953,6 +978,182 @@ final class CanvasDocument: ObservableObject {
         items.append(contentsOf: newItems)
         selectedIDs = Set(newItems.map { $0.id })
         save()
+    }
+
+    /// Replaces an existing image card's file content in place — same
+    /// position/size, crop reset to the full new image — used when a file
+    /// from Finder is dropped directly onto a card rather than empty canvas.
+    /// If `sourceURL` isn't already inside this document's folder, it's
+    /// copied in first, same as a normal drop. The old file is trashed
+    /// (undo-ably) unless some other item still references it.
+    func replaceImage(_ itemID: UUID, with sourceURL: URL) {
+        guard let item = items.first(where: { $0.id == itemID }), item.kind == .image else { return }
+        if let error = ImageFileSupport.oversizeError(for: sourceURL) {
+            importError = error
+            return
+        }
+
+        let oldFileID = item.fileID
+
+        let isAlreadyLocal = sourceURL.deletingLastPathComponent().standardizedFileURL == folderURL.standardizedFileURL
+        // A file already inside the folder might still be a different card's
+        // own image (e.g. dragged a second time from the project folder's
+        // own Finder window after an earlier replace copied it in) — every
+        // item needs a distinct file, since reconciliation on reload can
+        // only represent one item per filename, so that case still needs a
+        // fresh copy rather than reusing the claimed file directly.
+        let isClaimedByAnotherItem = items.contains {
+            $0.id != itemID && $0.kind == .image && $0.filename == sourceURL.lastPathComponent
+        }
+
+        let finalName: String
+        let destURL: URL
+        var copiedNewFile = false
+        if isAlreadyLocal, !isClaimedByAnotherItem {
+            finalName = sourceURL.lastPathComponent
+            destURL = sourceURL
+        } else if isAlreadyLocal {
+            finalName = ImageFileSupport.duplicateFilename(for: sourceURL.lastPathComponent, in: folderURL)
+            destURL = folderURL.appendingPathComponent(finalName)
+            guard (try? FileManager.default.copyItem(at: sourceURL, to: destURL)) != nil else {
+                NSSound.beep()
+                return
+            }
+            copiedNewFile = true
+        } else {
+            finalName = ImageFileSupport.availableFilename(for: sourceURL.lastPathComponent, in: folderURL)
+            destURL = folderURL.appendingPathComponent(finalName)
+            let isAccessingScope = sourceURL.startAccessingSecurityScopedResource()
+            defer { if isAccessingScope { sourceURL.stopAccessingSecurityScopedResource() } }
+            do {
+                try FileManager.default.copyItem(at: sourceURL, to: destURL)
+                copiedNewFile = true
+            } catch {
+                NSSound.beep()
+                return
+            }
+        }
+
+        let newFileID = ImageFileSupport.fileID(of: destURL)
+
+        // The old file's data is left untouched on disk — only this card
+        // stops referencing it. If nothing else on the canvas still points
+        // at it (e.g. a duplicate), it's excluded the same way a plain
+        // Remove from Canvas works, so a later Refresh doesn't silently
+        // re-add it as a new, unrelated card.
+        let oldFileStillUsed = items.contains { $0.id != itemID && $0.kind == .image && $0.fileID == oldFileID }
+        let shouldExcludeOldFile = !oldFileStillUsed && newFileID != oldFileID && oldFileID != nil
+
+        registerUndoCheckpoint(actionName: "Replace Image") { target in
+            if copiedNewFile {
+                try? FileManager.default.trashItem(at: destURL, resultingItemURL: nil)
+            }
+            if shouldExcludeOldFile, let oldFileID {
+                target.excludedFileIDs.remove(oldFileID)
+            }
+        }
+
+        if shouldExcludeOldFile, let oldFileID {
+            excludedFileIDs.insert(oldFileID)
+        }
+
+        updateItem(itemID) { current in
+            current.filename = finalName
+            current.fileID = newFileID
+            current.cropX = 0
+            current.cropY = 0
+            current.cropWidth = 1
+            current.cropHeight = 1
+        }
+        save()
+    }
+
+    // MARK: - Clipboard
+
+    /// Snapshots the current selection into the shared clipboard without
+    /// touching the canvas — a later paste (here or in another document's
+    /// window) duplicates each item, copying image files anew each time.
+    func copySelectedToClipboard() {
+        let targets = items.filter { selectedIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        CanvasClipboard.shared.payload = CanvasClipboard.Payload(mode: .copy, items: targets, sourceFolderURL: folderURL)
+    }
+
+    /// Snapshots the current selection into the shared clipboard, then
+    /// removes it from this canvas the same (non-destructive) way plain
+    /// Delete does — the file itself stays on disk until a paste lands
+    /// somewhere, so undoing a cut with nothing pasted yet still works.
+    func cutSelectedToClipboard() {
+        let targets = items.filter { selectedIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        CanvasClipboard.shared.payload = CanvasClipboard.Payload(mode: .cut, items: targets, sourceFolderURL: folderURL)
+        removeFromCanvas(selectedIDs)
+    }
+
+    /// Pastes the clipboard's items centered on `point` (local to
+    /// `boardIndex`'s own origin, same convention as `addImage`/
+    /// `addTextItem`), preserving their arrangement relative to one another.
+    /// A copied image is duplicated into a fresh file every paste, like
+    /// `duplicateItems`. A cut image pasted back into its *own* source
+    /// document is just repositioned — no file copy — matching a real move;
+    /// pasted into a different document (or copied a second time after
+    /// that), it falls back to copying the file across, since the original
+    /// document's own reference to it is already gone.
+    func pasteFromClipboard(at point: CGPoint, boardIndex: Int) {
+        guard let payload = CanvasClipboard.shared.payload, !payload.items.isEmpty else { return }
+        let fm = FileManager.default
+        let isSameDocument = payload.sourceFolderURL.standardizedFileURL == folderURL.standardizedFileURL
+
+        let minX = payload.items.map(\.x).min() ?? 0
+        let minY = payload.items.map(\.y).min() ?? 0
+        let maxX = payload.items.map { $0.x + $0.width }.max() ?? 0
+        let maxY = payload.items.map { $0.y + $0.height }.max() ?? 0
+        let dx = point.x - (minX + maxX) / 2
+        let dy = point.y - (minY + maxY) / 2
+
+        var newItems: [CanvasItem] = []
+        var copiedURLs: [URL] = []
+
+        for original in payload.items {
+            var newItem = original
+            newItem.id = UUID()
+            newItem.x = max(original.x + dx, 0)
+            newItem.y = max(original.y + dy, 0)
+            newItem.boardIndex = boardIndex
+
+            if original.kind == .image {
+                if payload.mode == .cut, isSameDocument {
+                    if let fileID = original.fileID { excludedFileIDs.remove(fileID) }
+                } else {
+                    let sourceFileURL = payload.sourceFolderURL.appendingPathComponent(original.filename)
+                    guard fm.fileExists(atPath: sourceFileURL.path) else { continue }
+                    let newName = ImageFileSupport.duplicateFilename(for: original.filename, in: folderURL)
+                    let destURL = folderURL.appendingPathComponent(newName)
+                    guard (try? fm.copyItem(at: sourceFileURL, to: destURL)) != nil else { continue }
+                    copiedURLs.append(destURL)
+                    newItem.filename = newName
+                    newItem.fileID = ImageFileSupport.fileID(of: destURL)
+                }
+            }
+            newItems.append(newItem)
+        }
+        guard !newItems.isEmpty else { return }
+
+        registerUndoCheckpoint(actionName: payload.mode == .cut ? "Paste (Move)" : "Paste") { _ in
+            for url in copiedURLs {
+                try? fm.trashItem(at: url, resultingItemURL: nil)
+            }
+        }
+
+        items.append(contentsOf: newItems)
+        selectedIDs = Set(newItems.map { $0.id })
+        save()
+
+        // A cut can only really "move" once — any further paste (here or
+        // elsewhere) duplicates instead, since the original slot is gone.
+        if payload.mode == .cut {
+            CanvasClipboard.shared.payload?.mode = .copy
+        }
     }
 
     // MARK: - Layering (z-order)

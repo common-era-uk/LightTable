@@ -2,6 +2,15 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.2.0 — 2026-09-02
+
+- Dropping multiple files from Finder at once now cascades them diagonally instead of stacking every card on top of the same spot.
+- Dragging a file from Finder directly onto an existing image card now replaces its content in place (same position and size, crop reset) — the target card highlights with a bounding box while the file is dragged over it. The old file is removed from the canvas, not trashed; it stays on disk unless another card still uses it.
+- Fixed replacing an image with a file already used by a different card silently making one of the two cards disappear the next time the document was reopened.
+- Holding ⇧ while dragging an image card or text item now restricts movement to a straight horizontal or vertical line.
+- A text box whose content no longer fits its frame now shows a small red "…" badge over its bottom-right corner.
+- Cut, Copy, and Paste now work for the canvas selection (images and text), not just inside text fields — Copy duplicates, Cut moves, and Paste works across art boards and between open documents.
+
 ## 1.1.0 — 2026-08-28
 
 - Added art boards: a canvas can now hold multiple boards, stacked vertically, each with its own images and layout. Add one with the "+" button below the last board; right-click a board's background for "Move to…" (type a target position) or "Delete Art Board" (files stay in the folder, same as Remove from Canvas). Drag a card past a board's edge and it lands on whichever board it's now over.
