@@ -3,6 +3,15 @@
     <channel>
         <title>LightTable</title>
         <item>
+            <title>1.1.2</title>
+            <pubDate>Fri, 04 Sep 2026 00:21:26 +0100</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.2/LightTable-1.1.2.zip" length="2078278" type="application/octet-stream" sparkle:edSignature="qwg+h4AiC9wmlNdeFnuDu0XUGwn1abb0PRTyne4XpuymX8IcURg2kWH+fTMUp2zHUtWVYbY2atMsKMXZMCCeDQ=="/>
+        </item>
+        <item>
             <title>1.1.1</title>
             <pubDate>Wed, 02 Sep 2026 20:35:07 +0100</pubDate>
             <sparkle:version>8</sparkle:version>
@@ -19,15 +28,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.0/LightTable-1.1.0.zip" length="2025830" type="application/octet-stream" sparkle:edSignature="ycADiAVQ1gzuMM5W+dsPxLVHTEdf+5Be9Wg4V7j6ZBbkAWSeBUexD85o1QnI1wAcQ4DYtYnI7Tn925V6Kbw1AA=="/>
-        </item>
-        <item>
-            <title>1.0.10</title>
-            <pubDate>Thu, 27 Aug 2026 11:49:05 +0100</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>1.0.10</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.0.10/LightTable-1.0.10.zip" length="1847145" type="application/octet-stream" sparkle:edSignature="VD1ZKCAPGZOyjnwt5hY10V/YygQwPdLgtq6PndRdNHdBQZF/wTNE5H60S8zod3Czsxm/Q1lmkkBKezLVgzPNDg=="/>
         </item>
     </channel>
 </rss>
