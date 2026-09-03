@@ -42,11 +42,25 @@ struct ImageCardView: View {
 
     var body: some View {
         if let item {
-            let isSelected = document.selectedIDs.contains(itemID)
-            let groupOffset = isSelected ? document.groupDragOffset : .zero
-            let rect = currentRect(for: item, isSelected: isSelected).offsetBy(dx: groupOffset.width, dy: groupOffset.height)
+            if item.kind == .text, textFormatItemID == itemID {
+                editingTextCard(item: item)
+            } else {
+                interactiveCard(item: item)
+            }
+        }
+    }
 
-            ZStack(alignment: .topLeading) {
+    /// The normal, interactive card — selectable, draggable, resizable, with
+    /// its context menu — used for every item except a text item currently
+    /// being edited inline (see `editingTextCard`), which swaps out all of
+    /// this for a plain live text editor so clicks and drags inside it go
+    /// straight to the text view instead of competing with these gestures.
+    private func interactiveCard(item: CanvasItem) -> some View {
+        let isSelected = document.selectedIDs.contains(itemID)
+        let groupOffset = isSelected ? document.groupDragOffset : .zero
+        let rect = currentRect(for: item, isSelected: isSelected).offsetBy(dx: groupOffset.width, dy: groupOffset.height)
+
+        return ZStack(alignment: .topLeading) {
                 cardContent(item: item, rect: rect)
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
@@ -60,7 +74,7 @@ struct ImageCardView: View {
                     )
                     .gesture(moveGesture)
                     .onTapGesture(count: 2) {
-                        if item.kind == .text { textFormatItemID = itemID } else { cropModeItemID = itemID }
+                        if item.kind == .text { beginEditingText() } else { cropModeItemID = itemID }
                     }
                     .onTapGesture { selectOnTap() }
                     .contextMenu {
@@ -73,7 +87,7 @@ struct ImageCardView: View {
                         Button(item.kind == .text ? "Edit Text" : "Crop") {
                             let targets = contextMenuTargets()
                             if targets.count == 1, let id = targets.first {
-                                if item.kind == .text { textFormatItemID = id } else { cropModeItemID = id }
+                                if item.kind == .text { beginEditingText() } else { cropModeItemID = id }
                             }
                         }
                         .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -122,7 +136,49 @@ struct ImageCardView: View {
             }
             .frame(width: rect.width, height: rect.height, alignment: .topLeading)
             .position(x: rect.midX, y: rect.midY)
-        }
+    }
+
+    /// A text item currently being edited inline — a live, styled
+    /// `NSTextView` filling the card's frame — `CanvasView` shows a floating
+    /// formatting panel alongside it (see `TextFormattingPopoverView`)
+    /// instead of the old modal sheet. None of `interactiveCard`'s
+    /// selection/drag/resize gestures are attached here, so every click and
+    /// drag goes straight to normal text editing (placing the cursor,
+    /// selecting a range) instead of competing with them.
+    private func editingTextCard(item: CanvasItem) -> some View {
+        let rect = currentRect(for: item, isSelected: true)
+        return LiveTextEditorView(
+            text: textBinding,
+            font: item.resolvedFont,
+            textColor: item.textColor?.color ?? .primary,
+            tracking: item.letterSpacing,
+            lineSpacing: item.lineSpacing,
+            alignment: item.nsTextAlignment,
+            wraps: item.isTextBox,
+            onFocusLost: { document.save() }
+        )
+        .frame(width: rect.width, height: rect.height, alignment: .topLeading)
+        .clipped()
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.accentColor, lineWidth: 3)
+        )
+        .position(x: rect.midX, y: rect.midY)
+    }
+
+    private var textBinding: Binding<String> {
+        Binding(
+            get: { document.items.first { $0.id == itemID }?.text ?? "" },
+            set: { newValue in document.updateItem(itemID) { $0.text = newValue } }
+        )
+    }
+
+    /// Registers one "Edit Text" undo step and enters inline editing —
+    /// shared by the double-click gesture and the context menu's "Edit
+    /// Text" button.
+    private func beginEditingText() {
+        document.registerUndoCheckpoint(actionName: "Edit Text")
+        textFormatItemID = itemID
     }
 
     @ViewBuilder
@@ -207,6 +263,13 @@ struct ImageCardView: View {
     }
 
     private func selectOnTap() {
+        // A plain click on a different card while another text item is being
+        // edited inline ends that editing session (a double-click is needed
+        // to start editing this one instead).
+        if let current = textFormatItemID, current != itemID {
+            textFormatItemID = nil
+            document.save()
+        }
         document.selectedGuideID = nil
         let modifiers = NSEvent.modifierFlags
         if modifiers.contains(.shift) || modifiers.contains(.command) {

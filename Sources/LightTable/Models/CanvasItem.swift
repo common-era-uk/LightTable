@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 
 enum ItemKind: String, Codable {
     case image
@@ -7,7 +8,7 @@ enum ItemKind: String, Codable {
 }
 
 enum TextAlignmentOption: String, Codable, CaseIterable, Identifiable {
-    case leading, center, trailing
+    case leading, center, trailing, justify
 
     var id: String { rawValue }
 }
@@ -143,5 +144,46 @@ struct CanvasItem: Identifiable, Codable, Equatable {
 
     var cropRect: CGRect {
         CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)
+    }
+
+    /// This text item's actual font with bold/italic baked in via
+    /// `NSFontManager`'s trait conversion — the same technique the system
+    /// font panel itself uses, and more faithful than SwiftUI's own
+    /// `.bold()`/`.italic()` modifiers for a font that isn't a system font.
+    /// Unused for image items.
+    var resolvedFont: NSFont {
+        let base = NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize)
+        var traits: NSFontTraitMask = []
+        if isBold { traits.insert(.boldFontMask) }
+        if isItalic { traits.insert(.italicFontMask) }
+        guard !traits.isEmpty else { return base }
+        return NSFontManager.shared.convert(base, toHaveTrait: traits)
+    }
+
+    /// `textAlignment` translated to AppKit's equivalent, for the
+    /// `NSTextView`-based rendering both the live inline editor and the
+    /// static (non-editing/export) display use. Unused for image items.
+    var nsTextAlignment: NSTextAlignment {
+        switch textAlignment {
+        case .leading: return .left
+        case .center: return .center
+        case .trailing: return .right
+        case .justify: return .justified
+        }
+    }
+
+    /// The exact per-line height this item renders at, shared by
+    /// `LiveTextEditorView` (an `NSTextView`, while editing) and
+    /// `CoreTextRenderView` (Core Text directly, everywhere else) via
+    /// `NSParagraphStyle`'s `minimumLineHeight`/`maximumLineHeight` — a
+    /// constraint both engines are built to honor identically, unlike
+    /// leaving each to compute its own "natural" line height (which
+    /// disagree by a font-dependent amount, mostly from how each folds in —
+    /// or excludes — the font's own leading), which visibly changed line
+    /// spacing when entering or leaving inline editing. Excludes the font's
+    /// leading value entirely (uses ascender/descender only) so `lineSpacing
+    /// == 1` reads as a tight, no-extra-gap baseline for both.
+    var resolvedLineHeight: Double {
+        (resolvedFont.ascender - resolvedFont.descender) * lineSpacing
     }
 }

@@ -2,6 +2,12 @@
 
 All notable changes to LightTable are tracked here, most recent first.
 
+## 1.1.2 — 2026-09-04
+
+- Editing a text item is now fully inline — double-click it to type directly on the canvas, styled live, with a small floating panel alongside it for typeface, size, Bold/Italic, colour, alignment, letter spacing, and line height. Replaces the old separate "Edit Text" window.
+- Added a Justify option to text alignment.
+- The overset "…" badge (a text item whose content no longer fits its frame) now also applies to text fields, not just text boxes.
+
 ## 1.1.1 — 2026-09-02
 
 - Dropping multiple files from Finder at once now cascades them diagonally instead of stacking every card on top of the same spot.

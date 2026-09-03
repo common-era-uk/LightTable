@@ -47,6 +47,10 @@ struct CanvasView: View {
     /// that regardless of the exact cause.
     @State private var hoveredBoardIndex: Int?
     @State private var previewItemID: UUID?
+    /// The formatting panel's own rendered height, captured once it first
+    /// lays out — used to center it (and point its arrow) on the text item
+    /// being edited before its exact height is known on the very first frame.
+    @State private var formattingPanelHeight: CGFloat?
     @State private var isSpaceDown = false
     @State private var spacePanBaseline: CGSize?
     @State private var spacePanVelocity: CGSize = .zero
@@ -224,6 +228,7 @@ struct CanvasView: View {
                     )
                 }
                 spacePanOverlay
+                textFormattingOverlay
             }
             .coordinateSpace(name: "viewport")
             .frame(width: geo.size.width, height: geo.size.height)
@@ -232,6 +237,10 @@ struct CanvasView: View {
             .onTapGesture {
                 document.selectedIDs = []
                 document.selectedGuideID = nil
+                if textFormatItemID != nil {
+                    textFormatItemID = nil
+                    document.save()
+                }
             }
             .onContinuousHover { phase in
                 switch phase {
@@ -300,6 +309,7 @@ struct CanvasView: View {
                 Button("Crop", systemImage: "crop") {
                     if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
                         if document.items.first(where: { $0.id == id })?.kind == .text {
+                            document.registerUndoCheckpoint(actionName: "Edit Text")
                             textFormatItemID = id
                         } else {
                             cropModeItemID = id
@@ -427,11 +437,6 @@ struct CanvasView: View {
                 CropView(document: document, itemID: id, isPresented: cropSheetBinding)
             }
         }
-        .sheet(isPresented: textFormatSheetBinding) {
-            if let id = textFormatItemID {
-                TextFormatSheet(document: document, itemID: id, isPresented: textFormatSheetBinding)
-            }
-        }
         .sheet(isPresented: $showRenameSheet) {
             RenamePanelView(document: document, isPresented: $showRenameSheet)
         }
@@ -485,13 +490,6 @@ struct CanvasView: View {
         )
     }
 
-    private var textFormatSheetBinding: Binding<Bool> {
-        Binding(
-            get: { textFormatItemID != nil },
-            set: { if !$0 { textFormatItemID = nil } }
-        )
-    }
-
     /// `.sheet(item:)` needs an `Identifiable` wrapper around a plain `Int`.
     private var moveBoardBinding: Binding<IdentifiedInt?> {
         Binding(
@@ -502,6 +500,48 @@ struct CanvasView: View {
 
     private func boardOrigin(for boardIndex: Int) -> CGPoint {
         boardOrigins.indices.contains(boardIndex) ? boardOrigins[boardIndex] : .zero
+    }
+
+    /// The floating formatting panel shown alongside a text item while it's
+    /// being edited inline (see `ImageCardView.editingTextCard`) — placed to
+    /// whichever side of the item has room, with its arrow always pointing
+    /// at the item's exact vertical center even if the panel itself has to
+    /// shift to stay on screen. A plain positioned overlay rather than a
+    /// real `.popover`, since a popover closes itself on any click back in
+    /// the text view it's attached to — including a single click meant only
+    /// to reposition the cursor there.
+    @ViewBuilder
+    private var textFormattingOverlay: some View {
+        if let id = textFormatItemID, let item = document.items.first(where: { $0.id == id }), item.kind == .text {
+            let origin = boardOrigin(for: item.boardIndex)
+            let itemScreenRect = screenRect(origin: CGPoint(x: origin.x + item.x, y: origin.y + item.y), size: CGSize(width: item.width, height: item.height))
+            let panelWidth: CGFloat = 330
+            let arrowWidth: CGFloat = 12
+            let margin: CGFloat = 12
+            let panelHeight = formattingPanelHeight ?? 260
+            let pointsLeft = itemScreenRect.maxX + arrowWidth + panelWidth + margin <= viewportSize.width
+            let rawX = pointsLeft ? itemScreenRect.maxX + arrowWidth : itemScreenRect.minX - arrowWidth - panelWidth
+            let panelX = min(max(rawX, margin), max(viewportSize.width - panelWidth - margin, margin))
+            let desiredCenterY = itemScreenRect.midY
+            let panelTopY = min(max(desiredCenterY - panelHeight / 2, margin), max(viewportSize.height - panelHeight - margin, margin))
+            let arrowY = min(max(desiredCenterY, margin), max(viewportSize.height - margin, margin))
+
+            TextFormattingPopoverView(document: document, itemID: id)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { formattingPanelHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in formattingPanelHeight = newValue }
+                    }
+                )
+                .position(x: panelX + panelWidth / 2, y: panelTopY + panelHeight / 2)
+
+            TextFormattingPanelArrow(pointsLeft: pointsLeft)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(TextFormattingPanelArrow(pointsLeft: pointsLeft).stroke(Color.secondary.opacity(0.25)))
+                .frame(width: arrowWidth, height: arrowWidth * 1.7)
+                .position(x: pointsLeft ? itemScreenRect.maxX + arrowWidth / 2 : itemScreenRect.minX - arrowWidth / 2, y: arrowY)
+        }
     }
 
     /// Converts a point from `.onContinuousHover`'s outer "viewport" space
@@ -633,6 +673,7 @@ struct CanvasView: View {
         let origin = boardOrigin(for: boardIndex)
         let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
         let newID = document.addTextItem(isBox: isBox, at: localPoint, boardIndex: boardIndex)
+        document.registerUndoCheckpoint(actionName: "Edit Text")
         textFormatItemID = newID
     }
 
@@ -1032,6 +1073,22 @@ struct CanvasView: View {
             }
             guard event.type == .keyDown else { return event }
 
+            // While a text item is being edited inline, this monitor's own
+            // shortcuts must stay out of the way entirely — Delete/Backspace
+            // above all, which needs to reach the text view normally instead
+            // of deleting the canvas item currently being typed into (now
+            // that editing happens in this same window rather than a
+            // separate sheet). Escape is the one exception: it explicitly
+            // ends the editing session.
+            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else {
+                if textFormatItemID != nil, event.keyCode == 53 {
+                    textFormatItemID = nil
+                    document.save()
+                    return nil
+                }
+                return event
+            }
+
             if event.keyCode == 51 || event.keyCode == 117 {
                 if let guideID = document.selectedGuideID {
                     document.removeGuide(guideID)
@@ -1046,8 +1103,6 @@ struct CanvasView: View {
                     return nil
                 }
             }
-
-            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else { return event }
 
             // Space toggles a large preview of the single selected card,
             // closed again with Space or Escape — like Quick Look. Holding
@@ -1330,6 +1385,7 @@ private struct EditMenuCommands: ViewModifier {
                 guard isKeyWindow else { return }
                 if let id = document.selectedIDs.first, document.selectedIDs.count == 1 {
                     if document.items.first(where: { $0.id == id })?.kind == .text {
+                        document.registerUndoCheckpoint(actionName: "Edit Text")
                         textFormatItemID = id
                     } else {
                         cropModeItemID = id
