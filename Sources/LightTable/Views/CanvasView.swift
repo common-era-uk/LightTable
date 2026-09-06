@@ -441,9 +441,9 @@ struct CanvasView: View {
             RenamePanelView(document: document, isPresented: $showRenameSheet)
         }
         .sheet(isPresented: $showCreateGridSheet) {
-            CreateGridSheet { spacing, isPercentage in
+            CreateGridSheet { spacing, isPercentage, limit in
                 showCreateGridSheet = false
-                document.createGrid(document.selectedIDs, spacing: spacing, isPercentage: isPercentage)
+                document.createGrid(document.selectedIDs, spacing: spacing, isPercentage: isPercentage, limit: limit)
             } onCancel: {
                 showCreateGridSheet = false
             }

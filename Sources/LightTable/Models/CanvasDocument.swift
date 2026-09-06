@@ -1342,7 +1342,7 @@ final class CanvasDocument: ObservableObject {
     /// gets split, item by item. The grid starts at the selection's own
     /// top-left corner, so it replaces the selected images roughly where
     /// they already were.
-    func createGrid(_ ids: Set<UUID>, spacing: Double, isPercentage: Bool) {
+    func createGrid(_ ids: Set<UUID>, spacing: Double, isPercentage: Bool, limit: GridLayoutLimit = .fitWidth) {
         // Text items don't participate — a grid re-flow only makes sense
         // for photos.
         let allTargets = items.filter { ids.contains($0.id) && $0.kind == .image }
@@ -1350,12 +1350,30 @@ final class CanvasDocument: ObservableObject {
         let targets = allTargets.filter { $0.boardIndex == boardIndex }
         guard targets.count >= 2, boardSizes.indices.contains(boardIndex) else { return }
 
+        let originX = targets.map(\.x).min() ?? 0
+        let originY = targets.map(\.y).min() ?? 0
+
+        registerUndoCheckpoint(actionName: "Create Grid")
+
+        switch limit {
+        case .fitWidth:
+            layoutGridFitWidth(targets, spacing: spacing, isPercentage: isPercentage, boardIndex: boardIndex, originX: originX, originY: originY)
+        case .maxPerRow(let count):
+            layoutGridFixedRows(targets, maxPerRow: max(count, 1), spacing: spacing, isPercentage: isPercentage, boardIndex: boardIndex, originX: originX, originY: originY)
+        case .maxPerColumn(let count):
+            layoutGridFixedColumns(targets, maxPerColumn: max(count, 1), spacing: spacing, isPercentage: isPercentage, boardIndex: boardIndex, originX: originX, originY: originY)
+        }
+
+        selectedIDs = Set(targets.map(\.id))
+        save()
+    }
+
+    /// The default grid mode: wraps rows to fit the board's width, starting
+    /// from the images' existing row groupings (see `createGrid`'s doc).
+    private func layoutGridFitWidth(_ targets: [CanvasItem], spacing: Double, isPercentage: Bool, boardIndex: Int, originX: Double, originY: Double) {
         let existingRows = Self.rowGroupedReadingOrder(targets)
         let commonHeight = targets.reduce(0.0) { $0 + $1.height } / Double(targets.count)
         let gap = isPercentage ? commonHeight * (spacing / 100) : spacing
-
-        let originX = targets.map(\.x).min() ?? 0
-        let originY = targets.map(\.y).min() ?? 0
         let maxRowWidth = max(boardSizes[boardIndex].width - originX, commonHeight)
 
         func entries(for row: [CanvasItem]) -> [GridEntry] {
@@ -1397,8 +1415,6 @@ final class CanvasDocument: ObservableObject {
         }
         if !current.isEmpty { outputRows.append(current) }
 
-        registerUndoCheckpoint(actionName: "Create Grid")
-
         var cursorY = originY
         var maxY = originY
         for row in outputRows {
@@ -1419,7 +1435,90 @@ final class CanvasDocument: ObservableObject {
         if boardSizeMode == .auto {
             boardSizes[boardIndex].height = max(boardSizes[boardIndex].height, maxY + 90)
         }
-        selectedIDs = Set(targets.map(\.id))
-        save()
     }
+
+    /// A hard cap on how many images sit in each row, in reading order,
+    /// ignoring the board's width entirely — the last row simply gets
+    /// whatever remainder is left over when the count doesn't divide evenly.
+    private func layoutGridFixedRows(_ targets: [CanvasItem], maxPerRow: Int, spacing: Double, isPercentage: Bool, boardIndex: Int, originX: Double, originY: Double) {
+        let flat = Self.rowGroupedReadingOrder(targets).flatMap { $0 }
+        let commonHeight = targets.reduce(0.0) { $0 + $1.height } / Double(targets.count)
+        let gap = isPercentage ? commonHeight * (spacing / 100) : spacing
+
+        let rows = stride(from: 0, to: flat.count, by: maxPerRow).map { start in
+            Array(flat[start..<min(start + maxPerRow, flat.count)])
+        }
+
+        var cursorY = originY
+        var maxY = originY
+        for row in rows {
+            var cursorX = originX
+            for item in row {
+                let aspect = item.height > 0 ? item.width / item.height : 1
+                let width = commonHeight * aspect
+                updateItem(item.id) { current in
+                    current.x = cursorX
+                    current.y = cursorY
+                    current.width = width
+                    current.height = commonHeight
+                }
+                cursorX += width + gap
+            }
+            cursorY += commonHeight + gap
+            maxY = cursorY - gap
+        }
+
+        if boardSizeMode == .auto {
+            boardSizes[boardIndex].height = max(boardSizes[boardIndex].height, maxY + 90)
+        }
+    }
+
+    /// The column analogue of `layoutGridFixedRows` — every image shares a
+    /// common width instead of a common height, columns proceed left to
+    /// right, and each holds at most `maxPerColumn` images top to bottom in
+    /// reading order (again, the last column gets any remainder).
+    private func layoutGridFixedColumns(_ targets: [CanvasItem], maxPerColumn: Int, spacing: Double, isPercentage: Bool, boardIndex: Int, originX: Double, originY: Double) {
+        let flat = Self.rowGroupedReadingOrder(targets).flatMap { $0 }
+        let commonWidth = targets.reduce(0.0) { $0 + $1.width } / Double(targets.count)
+        let gap = isPercentage ? commonWidth * (spacing / 100) : spacing
+
+        let columns = stride(from: 0, to: flat.count, by: maxPerColumn).map { start in
+            Array(flat[start..<min(start + maxPerColumn, flat.count)])
+        }
+
+        var cursorX = originX
+        var maxX = originX
+        for column in columns {
+            var cursorY = originY
+            for item in column {
+                let aspect = item.width > 0 ? item.height / item.width : 1
+                let height = commonWidth * aspect
+                updateItem(item.id) { current in
+                    current.x = cursorX
+                    current.y = cursorY
+                    current.width = commonWidth
+                    current.height = height
+                }
+                cursorY += height + gap
+            }
+            cursorX += commonWidth + gap
+            maxX = cursorX - gap
+        }
+
+        if boardSizeMode == .auto {
+            boardSizes[boardIndex].width = max(boardSizes[boardIndex].width, maxX + 90)
+        }
+    }
+}
+
+/// How `CanvasDocument.createGrid` decides where a row/column wraps to the
+/// next. `.fitWidth` is the original behavior (wraps to fit the board);
+/// `.maxPerRow`/`.maxPerColumn` instead cap the count directly, ignoring
+/// width — deliberately mutually exclusive (fixing image count along one
+/// axis and letting the other grow to fit is meaningless in both directions
+/// at once, especially once the image count doesn't divide evenly).
+enum GridLayoutLimit: Equatable {
+    case fitWidth
+    case maxPerRow(Int)
+    case maxPerColumn(Int)
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CreateGridSheet: View {
-    let onCreate: (Double, Bool) -> Void
+    let onCreate: (Double, Bool, GridLayoutLimit) -> Void
     let onCancel: () -> Void
 
     private enum SpacingUnit: String, CaseIterable {
@@ -9,8 +9,17 @@ struct CreateGridSheet: View {
         case points = "Points"
     }
 
+    private enum LimitMode: String, CaseIterable, Identifiable {
+        case fitWidth = "Fit Width"
+        case maxPerRow = "Max Per Row"
+        case maxPerColumn = "Max Per Column"
+        var id: String { rawValue }
+    }
+
     @State private var spacingValue: Double = 20
     @State private var unit: SpacingUnit = .percentage
+    @State private var limitMode: LimitMode = .fitWidth
+    @State private var maxCount: Int = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -32,8 +41,28 @@ struct CreateGridSheet: View {
                 TextField("", value: $spacingValue, format: .number)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 70)
-                Text(unit == .points ? "pt" : "% of image height")
+                Text(spacingUnitLabel)
                     .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            Picker("", selection: $limitMode) {
+                ForEach(LimitMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            if limitMode != .fitWidth {
+                Stepper(value: $maxCount, in: 1...50) {
+                    HStack {
+                        Text(limitMode == .maxPerRow ? "Images per row:" : "Images per column:")
+                        Spacer()
+                        Text("\(maxCount)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
             }
 
             HStack {
@@ -41,12 +70,28 @@ struct CreateGridSheet: View {
                 Button("Cancel") { onCancel() }
                     .keyboardShortcut(.cancelAction)
                 Button("Create Grid") {
-                    onCreate(max(spacingValue, 0), unit == .percentage)
+                    onCreate(max(spacingValue, 0), unit == .percentage, limit)
                 }
                 .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
         .frame(width: 380)
+    }
+
+    /// The shared dimension spacing is a percentage *of* — image height for
+    /// the default and per-row modes (every image shares a height), image
+    /// width for per-column (every image shares a width instead).
+    private var spacingUnitLabel: String {
+        guard unit == .percentage else { return "pt" }
+        return limitMode == .maxPerColumn ? "% of image width" : "% of image height"
+    }
+
+    private var limit: GridLayoutLimit {
+        switch limitMode {
+        case .fitWidth: return .fitWidth
+        case .maxPerRow: return .maxPerRow(maxCount)
+        case .maxPerColumn: return .maxPerColumn(maxCount)
+        }
     }
 }
