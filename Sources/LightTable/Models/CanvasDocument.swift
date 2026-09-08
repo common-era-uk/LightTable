@@ -1068,6 +1068,59 @@ final class CanvasDocument: ObservableObject {
         save()
     }
 
+    /// Bakes `cropRect` into the pixels for real — exports a new,
+    /// permanently-cropped file and switches this card to it, resetting the
+    /// stored crop rect to the full image (there's nothing left to crop out
+    /// once the file itself is cropped). Same "soft removal" as
+    /// `replaceImage` for the original: its data is left untouched on disk,
+    /// just excluded from the canvas so a later Refresh or reopen doesn't
+    /// silently bring it back — dragging it in from Finder is still how you
+    /// get it back on purpose.
+    func applyCropAndReplace(_ itemID: UUID, cropRect: CGRect) throws {
+        guard let item = items.first(where: { $0.id == itemID }), item.kind == .image else { return }
+        let sourceURL = folderURL.appendingPathComponent(item.filename)
+
+        let aspect: Double
+        if let pixelSize = ImageFileSupport.pixelSize(of: sourceURL), pixelSize.width > 0, pixelSize.height > 0 {
+            let croppedWidth = cropRect.width * pixelSize.width
+            let croppedHeight = cropRect.height * pixelSize.height
+            aspect = croppedHeight > 0 ? croppedWidth / croppedHeight : 1
+        } else {
+            aspect = cropRect.width / max(cropRect.height, 0.01)
+        }
+
+        let newName = ImageFileSupport.duplicateFilename(for: item.filename, in: folderURL)
+        let destinationURL = folderURL.appendingPathComponent(newName)
+        try ImageExport.exportCroppedImage(sourceURL: sourceURL, cropRect: cropRect, to: destinationURL)
+
+        let oldFileID = item.fileID
+        let newFileID = ImageFileSupport.fileID(of: destinationURL)
+        let oldFileStillUsed = items.contains { $0.id != itemID && $0.kind == .image && $0.fileID == oldFileID }
+        let shouldExcludeOldFile = !oldFileStillUsed && oldFileID != nil
+
+        registerUndoCheckpoint(actionName: "Apply Crop & Replace") { target in
+            try? FileManager.default.trashItem(at: destinationURL, resultingItemURL: nil)
+            if shouldExcludeOldFile, let oldFileID {
+                target.excludedFileIDs.remove(oldFileID)
+            }
+        }
+
+        if shouldExcludeOldFile, let oldFileID {
+            excludedFileIDs.insert(oldFileID)
+        }
+
+        updateItem(itemID) { current in
+            current.filename = newName
+            current.fileID = newFileID
+            current.cropX = 0
+            current.cropY = 0
+            current.cropWidth = 1
+            current.cropHeight = 1
+            current.height = aspect > 0 ? current.width / aspect : current.height
+        }
+        save()
+    }
+
     // MARK: - Clipboard
 
     /// Snapshots the current selection into the shared clipboard without

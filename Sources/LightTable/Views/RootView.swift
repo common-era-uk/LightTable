@@ -224,13 +224,20 @@ struct RootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Either a folder or a `.lt` canvas file can be picked directly —
+    /// `syncDocument()` already handles both, so choosing a file here just
+    /// skips the folder step when there's no zero/one/several-canvases
+    /// ambiguity to resolve.
     private func pickFolder() -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
+        if let ltType = UTType(filenameExtension: CanvasDocument.fileExtension) {
+            panel.allowedContentTypes = [ltType]
+        }
         return panel.runModal() == .OK ? panel.url : nil
     }
 

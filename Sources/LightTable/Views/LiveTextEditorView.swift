@@ -1,6 +1,24 @@
 import SwiftUI
 import AppKit
 
+/// Grabs first responder the moment it's actually attached to a real
+/// window, rather than guessing at it with a `DispatchQueue.main.async`
+/// deferral (an arbitrary, unbounded wait for "some future run-loop turn")
+/// — `viewDidMoveToWindow` is the deterministic AppKit hook for exactly
+/// this, and avoids the brief, timing-dependent window during which the
+/// view can end up laid out without yet being focused/redrawn correctly.
+private final class FocusingTextView: NSTextView {
+    private var didRequestFocus = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard !didRequestFocus, let window else { return }
+        didRequestFocus = true
+        window.makeFirstResponder(self)
+        setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
+    }
+}
+
 /// A borderless, AppKit-backed text editor for editing a text item's
 /// content directly in place on the canvas, replacing the old modal "Edit
 /// Text" sheet. SwiftUI's `TextEditor` always wraps and can't be configured
@@ -30,7 +48,7 @@ struct LiveTextEditorView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSTextView {
-        let textView = NSTextView()
+        let textView = FocusingTextView()
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.isEditable = true
@@ -48,12 +66,6 @@ struct LiveTextEditorView: NSViewRepresentable {
         }
         textView.string = text
         applyStyle(to: textView)
-        DispatchQueue.main.async {
-            guard let window = textView.window else { return }
-            window.makeFirstResponder(textView)
-            let end = (textView.string as NSString).length
-            textView.setSelectedRange(NSRange(location: end, length: 0))
-        }
         return textView
     }
 

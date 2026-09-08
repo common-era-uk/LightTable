@@ -2,6 +2,12 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.4 — 2026-09-08
+
+- The Open panel (File > Open…, "Open Folder…", and the welcome screen) now lets you pick a `.lt` canvas file directly, not just its containing folder.
+- Added "Apply & Replace" to the crop tool — switches the card to a permanently-cropped copy and removes the original from the canvas (it stays on disk, but won't come back on its own).
+- A possible fix for a rare glitch where the art board background could briefly turn solid black while editing a text item.
+
 ## 1.1.3 — 2026-09-07
 
 - Create Grid now has a "Max Per Row" or "Max Per Column" option, to force an exact count along one axis instead of fitting the canvas width.

@@ -90,7 +90,7 @@ struct CropView: View {
         VStack(spacing: 16) {
             Text("Crop")
                 .font(.title2.bold())
-            Text("Drag corners to crop. The original file is not modified. Use \"Apply & Export\" to save a copy of the cropped version (into the same folder).")
+            Text("Drag corners to crop. The original file is not modified. Use \"Apply & Export\" to save a copy of the cropped version alongside it, or \"Apply & Replace\" to switch this card to a cropped copy and remove the original from the canvas.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -133,12 +133,14 @@ struct CropView: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Apply & Export…") { applyCrop(alsoExport: true) }
                     .help("Save the crop and also write a cropped copy of the file, named with a \"-crop\" suffix, into the canvas folder")
+                Button("Apply & Replace") { applyCropAndReplace() }
+                    .help("Bake the crop into a new file and switch this card to it. The original file stays on disk but is removed from the canvas — not deleted, and not automatically re-added; drag it back from Finder if you want it back")
                 Button("Apply") { applyCrop(alsoExport: false) }
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
-        .frame(width: max(displaySize.width + 80, 610), height: displaySize.height + 260 + (aspectPreset == .custom ? 30 : 0))
+        .frame(width: max(displaySize.width + 80, 700), height: displaySize.height + 260 + (aspectPreset == .custom ? 30 : 0))
         .alert("Export Failed", isPresented: Binding(
             get: { exportError != nil },
             set: { isPresented in if !isPresented { exportError = nil } }
@@ -510,6 +512,15 @@ struct CropView: View {
         let destinationURL = document.folderURL.appendingPathComponent(croppedFilename)
         do {
             try ImageExport.exportCroppedImage(sourceURL: fileURL, cropRect: cropRect, to: destinationURL)
+            isPresented = false
+        } catch {
+            exportError = error.localizedDescription
+        }
+    }
+
+    private func applyCropAndReplace() {
+        do {
+            try document.applyCropAndReplace(itemID, cropRect: cropRect)
             isPresented = false
         } catch {
             exportError = error.localizedDescription

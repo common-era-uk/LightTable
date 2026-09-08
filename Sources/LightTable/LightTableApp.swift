@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Sparkle
+import UniformTypeIdentifiers
 
 @main
 struct LightTableApp: App {
@@ -244,14 +245,22 @@ struct LightTableApp: App {
     /// File > Open… — always opens in a new window (matching "New Window"
     /// and the toolbar's own "Open Folder…" button) rather than replacing
     /// whatever's in the frontmost window, so it can never look like it
-    /// just discarded an already-open canvas.
+    /// just discarded an already-open canvas. Either a folder or a `.lt`
+    /// canvas file can be chosen directly — `RootView.syncDocument()`
+    /// already handles both (a folder still goes through the usual
+    /// zero/one/several-canvases resolution; a `.lt` file opens straight
+    /// away, same as Finder-double-click or Open Recent), so picking a file
+    /// here just skips the folder step when there's no ambiguity to resolve.
     private func presentOpenPanel() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
+        if let ltType = UTType(filenameExtension: CanvasDocument.fileExtension) {
+            panel.allowedContentTypes = [ltType]
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openWindow(value: url)
     }
