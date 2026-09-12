@@ -181,7 +181,7 @@ struct LightTableApp: App {
                 }
                 .disabled(!menuSelectionState.hasMultipleSelected)
                 Divider()
-                Button("Toggle Guides") {
+                Button(menuSelectionState.showGuides ? "Turn Guides Off" : "Turn Guides On") {
                     NotificationCenter.default.post(name: .toggleShowGuides, object: nil)
                 }
                 Button("Change Guide Colour…") {
@@ -189,6 +189,9 @@ struct LightTableApp: App {
                 }
                 Button("Clear All Guides") {
                     NotificationCenter.default.post(name: .clearAllGuides, object: nil)
+                }
+                Button(menuSelectionState.smartGuidesEnabled ? "Turn Smart Guides Off" : "Turn Smart Guides On") {
+                    NotificationCenter.default.post(name: .toggleSmartGuides, object: nil)
                 }
                 Divider()
                 Button("Toggle Shadows") {

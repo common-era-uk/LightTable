@@ -67,6 +67,30 @@ struct Guide: Codable, Equatable, Identifiable {
     }
 }
 
+/// A live, computed (never persisted) alignment line shown while dragging —
+/// unlike a `Guide`, this isn't placed by the user; it's found fresh each
+/// drag frame wherever the dragged selection's edge or center matches
+/// another item's, and disappears the moment the drag ends or moves past
+/// the threshold. `start`/`end` bound the line to roughly where the two
+/// aligned things actually are (along the perpendicular axis), rather than
+/// spanning the whole board, the same way PowerPoint/Keynote's own smart
+/// guides stay close to the shapes they connect.
+/// What a `SmartAlignmentGuide` matched against — `SmartGuideLayer` colors
+/// the line differently per kind, so it reads at a glance which thing the
+/// drag actually snapped to.
+enum SmartAlignmentGuideKind: Equatable {
+    case sibling
+    case boardCenter
+}
+
+struct SmartAlignmentGuide: Equatable {
+    let orientation: GuideOrientation
+    let kind: SmartAlignmentGuideKind
+    let position: Double
+    let start: Double
+    let end: Double
+}
+
 /// A single art board's stored (nominal) size — its *actual* on-screen
 /// extent may be larger, if content currently exceeds this (see
 /// `CanvasDocument.boardDisplaySize`), the same "stored vs. displayed" split
@@ -211,6 +235,13 @@ final class CanvasDocument: ObservableObject {
     /// Live, uncommitted translation applied to all selected items while a
     /// group drag is in progress (visual preview only).
     @Published var groupDragOffset: CGSize = .zero
+    /// PowerPoint/Keynote-style alignment guides shown while dragging — up
+    /// to one vertical and one horizontal line, recomputed every drag frame
+    /// from the dragged selection's edges/center matching another item's on
+    /// the same board (see `ImageCardView.smartAlignedOffset`). Purely
+    /// visual/transient like `groupDragOffset`: never persisted, cleared
+    /// the moment the drag ends.
+    @Published var activeSmartGuides: [SmartAlignmentGuide] = []
     /// Live, uncommitted group-scale state while ⌘-dragging a corner handle
     /// with multiple items selected — the whole selection scales as one
     /// rigid block from `groupResizeAnchor` (a fixed point shared by every

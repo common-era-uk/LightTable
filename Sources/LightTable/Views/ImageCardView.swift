@@ -12,6 +12,7 @@ struct ImageCardView: View {
     @Binding var textFormatItemID: UUID?
     let showFilenames: Bool
     let zoom: CGFloat
+    let smartGuidesEnabled: Bool
     /// Where this item's board's local (0,0) lands in the shared,
     /// multi-board display space — all interactive math below works in that
     /// shared space (matching where guides and the drag gesture's own
@@ -321,12 +322,16 @@ struct ImageCardView: View {
                     document.selectedGuideID = nil
                 }
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
-                document.groupDragOffset = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
+                let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
+                let (offset, guides) = smartAlignedOffset(guideSnapped)
+                document.groupDragOffset = offset
+                document.activeSmartGuides = guides
             }
             .onEnded { value in
                 let ids = document.selectedIDs
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
-                let offset = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
+                let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
+                let (offset, _) = smartAlignedOffset(guideSnapped)
                 document.registerUndoCheckpoint(actionName: "Move")
 
                 let origins = document.boardOrigins()
@@ -345,6 +350,7 @@ struct ImageCardView: View {
                     }
                 }
                 document.groupDragOffset = .zero
+                document.activeSmartGuides = []
                 document.save()
             }
     }
@@ -414,6 +420,204 @@ struct ImageCardView: View {
         }
         guard let best else { return nil }
         return (best.edgeValue, best.guidePosition)
+    }
+
+    /// PowerPoint/Keynote-style smart alignment: given `offset` (already
+    /// clamped and snapped to any user guide/board edge), checks whether the
+    /// dragged selection's combined bounding box — even for a single item,
+    /// treated as a one-item group — has a left/center/right or
+    /// top/center/bottom that nearly matches another item's on the same
+    /// board, snaps to it if so, and returns the line(s) to display. Doesn't
+    /// touch anything if smart guides are off, or if nothing's close enough.
+    /// Independent of (and applied after) the existing guide/board snap —
+    /// the two rarely conflict in practice, and when they do, this one wins
+    /// for whichever axis it matches.
+    private func smartAlignedOffset(_ offset: CGSize) -> (CGSize, [SmartAlignmentGuide]) {
+        guard smartGuidesEnabled, let primary = item else { return (offset, []) }
+
+        let ids = document.selectedIDs.contains(itemID) ? document.selectedIDs : [itemID]
+        let selected = document.items.filter { ids.contains($0.id) }
+        guard !selected.isEmpty else { return (offset, []) }
+
+        let origins = document.boardOrigins()
+        func globalRect(of item: CanvasItem) -> CGRect {
+            let origin = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex] : .zero
+            return item.frame.offsetBy(dx: origin.x, dy: origin.y)
+        }
+
+        let liveRects = selected.map { globalRect(of: $0).offsetBy(dx: offset.width, dy: offset.height) }
+        guard let unionRect = liveRects.dropFirst().reduce(liveRects.first, { $0?.union($1) }) else {
+            return (offset, [])
+        }
+
+        let siblings = siblingRects(excluding: ids, onBoard: primary.boardIndex)
+        let threshold = 6.0 / max(zoom, 0.01)
+        let boardOrigin = origins.indices.contains(primary.boardIndex) ? origins[primary.boardIndex] : .zero
+        let boardRect = CGRect(origin: boardOrigin, size: document.boardDisplaySize(primary.boardIndex))
+
+        let siblingMatchX = bestSiblingMatch(siblings, draggedValues: [unionRect.minX, unionRect.midX, unionRect.maxX], threshold: threshold) { [$0.minX, $0.midX, $0.maxX] }
+        let bestX = bestAxisSnap(siblingMatch: siblingMatchX, draggedCenter: unionRect.midX, boardCenter: boardRect.midX, threshold: threshold)
+
+        let siblingMatchY = bestSiblingMatch(siblings, draggedValues: [unionRect.minY, unionRect.midY, unionRect.maxY], threshold: threshold) { [$0.minY, $0.midY, $0.maxY] }
+        let bestY = bestAxisSnap(siblingMatch: siblingMatchY, draggedCenter: unionRect.midY, boardCenter: boardRect.midY, threshold: threshold)
+
+        var adjusted = offset
+        var guides: [SmartAlignmentGuide] = []
+
+        if let bestX {
+            adjusted.width += bestX.target - bestX.dragged
+            let (kind, spanY0, spanY1): (SmartAlignmentGuideKind, Double, Double)
+            switch bestX.source {
+            case .sibling(let rect): (kind, spanY0, spanY1) = (.sibling, rect.minY, rect.maxY)
+            case .boardCenter: (kind, spanY0, spanY1) = (.boardCenter, boardRect.minY, boardRect.maxY)
+            }
+            guides.append(SmartAlignmentGuide(
+                orientation: .vertical, kind: kind, position: bestX.target,
+                start: min(unionRect.minY, spanY0), end: max(unionRect.maxY, spanY1)
+            ))
+        }
+        if let bestY {
+            adjusted.height += bestY.target - bestY.dragged
+            let (kind, spanX0, spanX1): (SmartAlignmentGuideKind, Double, Double)
+            switch bestY.source {
+            case .sibling(let rect): (kind, spanX0, spanX1) = (.sibling, rect.minX, rect.maxX)
+            case .boardCenter: (kind, spanX0, spanX1) = (.boardCenter, boardRect.minX, boardRect.maxX)
+            }
+            guides.append(SmartAlignmentGuide(
+                orientation: .horizontal, kind: kind, position: bestY.target,
+                start: min(unionRect.minX, spanX0), end: max(unionRect.maxX, spanX1)
+            ))
+        }
+
+        return (adjusted, guides)
+    }
+
+    private enum AxisSnapSource {
+        case sibling(CGRect)
+        case boardCenter
+    }
+
+    private struct AxisSnap {
+        let target: Double
+        let dragged: Double
+        let distance: Double
+        let source: AxisSnapSource
+    }
+
+    /// The closer of "matches a sibling's edge/center" (already computed via
+    /// `bestSiblingMatch`) and "matches the art board's own center" — the
+    /// single winner shown/snapped-to for one axis.
+    private func bestAxisSnap(
+        siblingMatch: (dragged: Double, sibling: Double, rect: CGRect, distance: Double)?,
+        draggedCenter: Double, boardCenter: Double, threshold: Double
+    ) -> AxisSnap? {
+        // The board's own center always wins when it's in range at all,
+        // even if a sibling's edge happens to be numerically closer — it's
+        // a single, unambiguous anchor for the whole board, so it's worth
+        // preferring over an incidental match with whichever card is nearby.
+        let centerDistance = abs(draggedCenter - boardCenter)
+        if centerDistance <= threshold {
+            return AxisSnap(target: boardCenter, dragged: draggedCenter, distance: centerDistance, source: .boardCenter)
+        }
+        if let siblingMatch {
+            return AxisSnap(target: siblingMatch.sibling, dragged: siblingMatch.dragged, distance: siblingMatch.distance, source: .sibling(siblingMatch.rect))
+        }
+        return nil
+    }
+
+    /// Every other item's rect on `boardIndex`, in the shared display space
+    /// — the pool of possible smart-alignment partners, shared by the move
+    /// (`smartAlignedOffset`) and resize (`smartSnappedResize`) checks.
+    private func siblingRects(excluding ids: Set<UUID>, onBoard boardIndex: Int) -> [CGRect] {
+        let origins = document.boardOrigins()
+        return document.items
+            .filter { !ids.contains($0.id) && $0.boardIndex == boardIndex }
+            .map { item -> CGRect in
+                let origin = origins.indices.contains(item.boardIndex) ? origins[item.boardIndex] : .zero
+                return item.frame.offsetBy(dx: origin.x, dy: origin.y)
+            }
+    }
+
+    /// The closest match between any of `draggedValues` and any of the
+    /// candidate values `valuesFor` extracts from each of `siblingRects`
+    /// (typically each rect's `[minX, midX, maxX]` or `[minY, midY, maxY]`)
+    /// within `threshold` — shared by the move and resize smart-guide checks.
+    private func bestSiblingMatch(
+        _ siblingRects: [CGRect], draggedValues: [Double], threshold: Double, valuesFor: (CGRect) -> [Double]
+    ) -> (dragged: Double, sibling: Double, rect: CGRect, distance: Double)? {
+        var best: (dragged: Double, sibling: Double, rect: CGRect, distance: Double)?
+        for rect in siblingRects {
+            for siblingValue in valuesFor(rect) {
+                for draggedValue in draggedValues {
+                    let distance = abs(draggedValue - siblingValue)
+                    if distance <= threshold, best == nil || distance < best!.distance {
+                        best = (draggedValue, siblingValue, rect, distance)
+                    }
+                }
+            }
+        }
+        return best
+    }
+
+    /// Smart-guide equivalent of `snappedScale`, applied *after* guide/board
+    /// snapping already produced `rect` — checks whichever corner is
+    /// actually being dragged (the one `adjustedRect` just moved) against
+    /// sibling items' edges and centers, and if one's close, recomputes the
+    /// rect at the scale that lands it exactly there, using the same
+    /// anchor-preserving math `adjustedRect` itself uses. That makes
+    /// resizing to match another card's edge — or its size, since matching
+    /// one edge while the far edge already lines up effectively matches
+    /// both dimensions — as easy as moving to match one already is. Scoped
+    /// to a plain (no ⌥ center-scale) resize of a single image; ⌥'s
+    /// different (center) anchor and text's independent-axis resize aren't
+    /// corner-anchored the same way, so they're left alone here.
+    private func smartSnappedResize(baseline: CGRect, corner: CardCorner, rect: CGRect) -> (CGRect, [SmartAlignmentGuide]) {
+        guard smartGuidesEnabled, let item else { return (rect, []) }
+        let ids = document.selectedIDs.contains(itemID) ? document.selectedIDs : [itemID]
+        let siblings = siblingRects(excluding: ids, onBoard: item.boardIndex)
+        guard !siblings.isEmpty else { return (rect, []) }
+
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+        let threshold = 6.0 / max(zoom, 0.01)
+
+        let freeX = isRight ? rect.maxX : rect.minX
+        let freeY = isBottom ? rect.maxY : rect.minY
+
+        let matchX = bestSiblingMatch(siblings, draggedValues: [freeX], threshold: threshold) { [$0.minX, $0.midX, $0.maxX] }
+        let matchY = bestSiblingMatch(siblings, draggedValues: [freeY], threshold: threshold) { [$0.minY, $0.midY, $0.maxY] }
+        guard matchX != nil || matchY != nil else { return (rect, []) }
+
+        let useX = matchX != nil && (matchY == nil || matchX!.distance <= matchY!.distance)
+
+        var scale: Double
+        let guide: SmartAlignmentGuide
+        if useX, let x = matchX {
+            scale = (isRight ? (x.sibling - baseline.minX) : (baseline.maxX - x.sibling)) / baseline.width
+            guide = SmartAlignmentGuide(
+                orientation: .vertical, kind: .sibling, position: x.sibling,
+                start: min(rect.minY, x.rect.minY), end: max(rect.maxY, x.rect.maxY)
+            )
+        } else if let y = matchY {
+            scale = (isBottom ? (y.sibling - baseline.minY) : (baseline.maxY - y.sibling)) / baseline.height
+            guide = SmartAlignmentGuide(
+                orientation: .horizontal, kind: .sibling, position: y.sibling,
+                start: min(rect.minX, y.rect.minX), end: max(rect.maxX, y.rect.maxX)
+            )
+        } else {
+            return (rect, [])
+        }
+
+        let minScale = max(minSize / baseline.width, minSize / baseline.height)
+        if !isRight { scale = min(scale, baseline.maxX / baseline.width) }
+        if !isBottom { scale = min(scale, baseline.maxY / baseline.height) }
+        scale = max(scale, minScale)
+
+        let width = baseline.width * scale
+        let height = baseline.height * scale
+        let x = isRight ? baseline.minX : baseline.maxX - width
+        let y = isBottom ? baseline.minY : baseline.maxY - height
+        return (CGRect(x: x, y: y, width: width, height: height), [guide])
     }
 
     /// Clamps a group move on two different bases per axis:
@@ -492,6 +696,7 @@ struct ImageCardView: View {
                     document.groupResizeAnchor = anchor
                     document.groupResizeSourceID = itemID
                     liveRect = Self.transformedRect(baseline, anchor: anchor, scale: scale)
+                    document.activeSmartGuides = []
                 } else {
                     groupResizeBBoxBaseline = nil
                     groupResizeOriginsSnapshot = nil
@@ -507,12 +712,24 @@ struct ImageCardView: View {
                         // aspect ratio — for accommodating wrapped text.
                         isTextScaleMode = false
                         liveRect = freeResizeRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height)
+                        document.activeSmartGuides = []
                     } else {
                         // ⌘ or ⌥ on a text item is a true proportional scale
                         // (font size included, applied in onEnded below) —
                         // same math images always use.
                         isTextScaleMode = isTextItem
-                        liveRect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, isCenterScale: isCenterScale)
+                        let rect = adjustedRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, isCenterScale: isCenterScale)
+                        if !isTextItem, !isCenterScale {
+                            // Smart-guide resize snapping — see
+                            // `smartSnappedResize`'s doc for why it's scoped
+                            // to a plain image resize only.
+                            let (smartRect, guides) = smartSnappedResize(baseline: baseline, corner: corner, rect: rect)
+                            liveRect = smartRect
+                            document.activeSmartGuides = guides
+                        } else {
+                            liveRect = rect
+                            document.activeSmartGuides = []
+                        }
                     }
                 }
             }
@@ -558,6 +775,7 @@ struct ImageCardView: View {
                 document.groupResizeScale = nil
                 document.groupResizeAnchor = nil
                 document.groupResizeSourceID = nil
+                document.activeSmartGuides = []
                 document.save()
             }
     }

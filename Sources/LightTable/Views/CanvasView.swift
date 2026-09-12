@@ -59,6 +59,7 @@ struct CanvasView: View {
     @State private var spacePanMomentumTimer: Timer?
     @State private var showFilenames = false
     @State private var showGuides = true
+    @State private var smartGuidesEnabled = true
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
     @State private var exportFormatCoordinator: ExportFormatCoordinator?
     @State private var keyMonitor: Any?
@@ -197,6 +198,9 @@ struct CanvasView: View {
                             onMoveGuide: { id, position in document.moveGuide(id, to: position) },
                             onRemoveGuide: { id in document.removeGuide(id) }
                         )
+                    }
+                    if smartGuidesEnabled {
+                        SmartGuideLayer(guides: document.activeSmartGuides)
                     }
                 }
                 .frame(width: contentSize.width, height: contentSize.height)
@@ -363,6 +367,13 @@ struct CanvasView: View {
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             showGuides.toggle()
             if !showGuides { document.selectedGuideID = nil }
+            MenuSelectionState.shared.showGuides = showGuides
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSmartGuides)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            smartGuidesEnabled.toggle()
+            if !smartGuidesEnabled { document.activeSmartGuides = [] }
+            MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
         }
         .onReceive(NotificationCenter.default.publisher(for: .openGuideColorPicker)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
@@ -406,6 +417,8 @@ struct CanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard let window = note.object as? NSWindow, window === hostWindow else { return }
             MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+            MenuSelectionState.shared.showGuides = showGuides
+            MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
         }
         .onAppear {
             installKeyMonitor()
@@ -416,6 +429,8 @@ struct CanvasView: View {
             hostWindow?.representedURL = document.ltFileURL
             if hostWindow != nil, hostWindow === NSApp.keyWindow {
                 MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+                MenuSelectionState.shared.showGuides = showGuides
+                MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
             }
         }
         .onDisappear {
@@ -430,6 +445,8 @@ struct CanvasView: View {
             newWindow?.representedURL = document.ltFileURL
             if newWindow != nil, newWindow === NSApp.keyWindow {
                 MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
+                MenuSelectionState.shared.showGuides = showGuides
+                MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
             }
         }
         .sheet(isPresented: cropSheetBinding) {
@@ -581,7 +598,7 @@ struct CanvasView: View {
 
     private var itemCardsLayer: some View {
         ForEach(document.items) { item in
-            ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, boardOrigin: boardOrigin(for: item.boardIndex))
+            ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, smartGuidesEnabled: smartGuidesEnabled, boardOrigin: boardOrigin(for: item.boardIndex))
         }
     }
 
