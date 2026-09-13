@@ -3,6 +3,15 @@
     <channel>
         <title>LightTable</title>
         <item>
+            <title>1.1.5</title>
+            <pubDate>Sun, 13 Sep 2026 01:12:19 +0100</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>1.1.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.5/LightTable-1.1.5.zip" length="2116897" type="application/octet-stream" sparkle:edSignature="jT7DisDJp7ccHbZjQpAq0HJwrfQC1oC7AiVHZ6TTAY14Vw9BBYKOE+GIBFwlEPlGXGCLMZsK2+dwCGqkGkH3AA=="/>
+        </item>
+        <item>
             <title>1.1.4</title>
             <pubDate>Tue, 08 Sep 2026 20:10:12 +0100</pubDate>
             <sparkle:version>11</sparkle:version>
@@ -19,15 +28,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.3/LightTable-1.1.3.zip" length="2082114" type="application/octet-stream" sparkle:edSignature="pWWKqcRhRWpTQlbOHBKgiA/4DN7Pbc21Pq7lxQpVd5H8BerDGDokcNDo68lN3HVoCvmh0+YJuuQ75S4Pszh/AA=="/>
-        </item>
-        <item>
-            <title>1.1.2</title>
-            <pubDate>Fri, 04 Sep 2026 00:21:26 +0100</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.2/LightTable-1.1.2.zip" length="2078278" type="application/octet-stream" sparkle:edSignature="qwg+h4AiC9wmlNdeFnuDu0XUGwn1abb0PRTyne4XpuymX8IcURg2kWH+fTMUp2zHUtWVYbY2atMsKMXZMCCeDQ=="/>
         </item>
     </channel>
 </rss>
