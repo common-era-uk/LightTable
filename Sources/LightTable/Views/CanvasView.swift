@@ -201,6 +201,7 @@ struct CanvasView: View {
                     }
                     if smartGuidesEnabled {
                         SmartGuideLayer(guides: document.activeSmartGuides)
+                        SmartSpacingLayer(gaps: document.activeSpacingGaps)
                     }
                 }
                 .frame(width: contentSize.width, height: contentSize.height)
@@ -372,7 +373,10 @@ struct CanvasView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleSmartGuides)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             smartGuidesEnabled.toggle()
-            if !smartGuidesEnabled { document.activeSmartGuides = [] }
+            if !smartGuidesEnabled {
+                document.activeSmartGuides = []
+                document.activeSpacingGaps = []
+            }
             MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
         }
         .onReceive(NotificationCenter.default.publisher(for: .openGuideColorPicker)) { _ in

@@ -91,6 +91,27 @@ struct SmartAlignmentGuide: Equatable {
     let end: Double
 }
 
+/// A PowerPoint/Keynote-style "these two gaps are equal" indicator, drawn
+/// as a small double-headed arrow across one gap between two items —
+/// always shown alongside at least one other `SmartSpacingGap` (the gap it
+/// was found to match), computed fresh each drag frame in
+/// `ImageCardView.horizontalSpacingMatch`/`verticalSpacingMatch`. Distinct
+/// from `SmartAlignmentGuide`, which is a single line at one position; a
+/// spacing match is always a *pair* of gap regions shown together.
+struct SmartSpacingGap: Equatable {
+    enum Axis: Equatable { case horizontal, vertical }
+    /// `.horizontal` = a gap between side-by-side items (row spacing, arrow
+    /// points left-right); `.vertical` = a gap between stacked items
+    /// (column spacing, arrow points up-down).
+    let axis: Axis
+    /// The gap's own extent along the spacing axis (an X range for
+    /// `.horizontal`, a Y range for `.vertical`).
+    let start: Double
+    let end: Double
+    /// Where to draw the arrow along the perpendicular axis.
+    let cross: Double
+}
+
 /// A single art board's stored (nominal) size — its *actual* on-screen
 /// extent may be larger, if content currently exceeds this (see
 /// `CanvasDocument.boardDisplaySize`), the same "stored vs. displayed" split
@@ -242,6 +263,11 @@ final class CanvasDocument: ObservableObject {
     /// visual/transient like `groupDragOffset`: never persisted, cleared
     /// the moment the drag ends.
     @Published var activeSmartGuides: [SmartAlignmentGuide] = []
+    /// The equal-spacing counterpart to `activeSmartGuides` — pairs of
+    /// matching gaps found while moving an item (see
+    /// `ImageCardView.horizontalSpacingMatch`/`verticalSpacingMatch`). Same
+    /// transient/visual-only lifetime.
+    @Published var activeSpacingGaps: [SmartSpacingGap] = []
     /// Live, uncommitted group-scale state while ⌘-dragging a corner handle
     /// with multiple items selected — the whole selection scales as one
     /// rigid block from `groupResizeAnchor` (a fixed point shared by every

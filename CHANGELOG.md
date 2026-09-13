@@ -2,6 +2,12 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.5 — 2026-09-13
+
+- Added smart alignment guides — while dragging an image or text item (or resizing a single image), pink lines appear when an edge or centre lines up with another item, and green ones when it lines up with the board's own centre; both snap the drag into place, like PowerPoint or Keynote.
+- Added equal-spacing arrows — snaps an item to match the gap either side of it to another gap nearby, including the board's own edge, an already-even row or column, and keeping a new row's spacing consistent with the row above it.
+- View > Toggle Guides and Toggle Smart Guides now read "Turn ... Off/On" to reflect whether they're currently on.
+
 ## 1.1.4 — 2026-09-08
 
 - The Open panel (File > Open…, "Open Folder…", and the welcome screen) now lets you pick a `.lt` canvas file directly, not just its containing folder.

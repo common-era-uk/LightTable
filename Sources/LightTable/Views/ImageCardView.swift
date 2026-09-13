@@ -323,15 +323,16 @@ struct ImageCardView: View {
                 }
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
-                let (offset, guides) = smartAlignedOffset(guideSnapped)
+                let (offset, guides, spacingGaps) = smartAlignedOffset(guideSnapped)
                 document.groupDragOffset = offset
                 document.activeSmartGuides = guides
+                document.activeSpacingGaps = spacingGaps
             }
             .onEnded { value in
                 let ids = document.selectedIDs
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
-                let (offset, _) = smartAlignedOffset(guideSnapped)
+                let (offset, _, _) = smartAlignedOffset(guideSnapped)
                 document.registerUndoCheckpoint(actionName: "Move")
 
                 let origins = document.boardOrigins()
@@ -351,6 +352,7 @@ struct ImageCardView: View {
                 }
                 document.groupDragOffset = .zero
                 document.activeSmartGuides = []
+                document.activeSpacingGaps = []
                 document.save()
             }
     }
@@ -432,12 +434,12 @@ struct ImageCardView: View {
     /// Independent of (and applied after) the existing guide/board snap —
     /// the two rarely conflict in practice, and when they do, this one wins
     /// for whichever axis it matches.
-    private func smartAlignedOffset(_ offset: CGSize) -> (CGSize, [SmartAlignmentGuide]) {
-        guard smartGuidesEnabled, let primary = item else { return (offset, []) }
+    private func smartAlignedOffset(_ offset: CGSize) -> (CGSize, [SmartAlignmentGuide], [SmartSpacingGap]) {
+        guard smartGuidesEnabled, let primary = item else { return (offset, [], []) }
 
         let ids = document.selectedIDs.contains(itemID) ? document.selectedIDs : [itemID]
         let selected = document.items.filter { ids.contains($0.id) }
-        guard !selected.isEmpty else { return (offset, []) }
+        guard !selected.isEmpty else { return (offset, [], []) }
 
         let origins = document.boardOrigins()
         func globalRect(of item: CanvasItem) -> CGRect {
@@ -447,7 +449,7 @@ struct ImageCardView: View {
 
         let liveRects = selected.map { globalRect(of: $0).offsetBy(dx: offset.width, dy: offset.height) }
         guard let unionRect = liveRects.dropFirst().reduce(liveRects.first, { $0?.union($1) }) else {
-            return (offset, [])
+            return (offset, [], [])
         }
 
         let siblings = siblingRects(excluding: ids, onBoard: primary.boardIndex)
@@ -489,7 +491,227 @@ struct ImageCardView: View {
             ))
         }
 
-        return (adjusted, guides)
+        // Equal-spacing only kicks in on an axis that didn't already get an
+        // alignment match above, so the two features don't compete for the
+        // same axis — checked against the rect as alignment left it, not
+        // the original `offset`, so the two compose sensibly when one axis
+        // aligns and the other spaces.
+        var spacingGaps: [SmartSpacingGap] = []
+        let postAlignmentRect = unionRect.offsetBy(dx: adjusted.width - offset.width, dy: adjusted.height - offset.height)
+        if bestX == nil, let match = horizontalSpacingMatch(draggedRect: postAlignmentRect, siblings: siblings, boardRect: boardRect, threshold: threshold) {
+            adjusted.width += match.adjustment
+            spacingGaps.append(contentsOf: match.gaps)
+        }
+        if bestY == nil {
+            if let match = verticalSpacingMatch(draggedRect: postAlignmentRect, siblings: siblings, boardRect: boardRect, threshold: threshold) {
+                adjusted.height += match.adjustment
+                spacingGaps.append(contentsOf: match.gaps)
+            } else if let match = crossAxisSpacingMatch(draggedRect: postAlignmentRect, siblings: siblings, threshold: threshold) {
+                adjusted.height += match.adjustment
+                spacingGaps.append(contentsOf: match.gaps)
+            }
+        }
+
+        return (adjusted, guides, spacingGaps)
+    }
+
+    /// One boundary a gap is measured against — either a real sibling's
+    /// rect, or the art board's own edge, standing in for "the nearest
+    /// thing in that direction" so a card sitting flush against a board
+    /// edge (nothing else beside it) can still take part in equal-spacing
+    /// matching against the board margin itself. `crossRect` is what the
+    /// arrow's perpendicular position is measured against — the board's
+    /// *own* full rect for an edge, which always safely contains any row's
+    /// cross-axis extent, so `cross(_:_:)` needs no special-casing for it.
+    private struct SpacingNeighbor {
+        let edge: Double
+        let crossRect: CGRect
+    }
+
+    /// Checks whether nudging the dragged rect horizontally would make its
+    /// gap to an immediate left/right neighbor — among items roughly in the
+    /// same row (overlapping it vertically), or the board's own left/right
+    /// edge when nothing else is there — match an already-established gap,
+    /// the way PowerPoint shows two small double-headed arrows when three
+    /// items (or an item and a board margin) are evenly spaced. Two cases:
+    /// sandwiched between two neighbors with a near-equal gap on each side
+    /// (centers it exactly between them), or extending an existing rhythm
+    /// by matching one neighbor's own gap to whatever's next beyond it.
+    private func horizontalSpacingMatch(draggedRect: CGRect, siblings: [CGRect], boardRect: CGRect, threshold: Double) -> (adjustment: Double, gaps: [SmartSpacingGap])? {
+        let rowSiblings = siblings.filter { $0.minY < draggedRect.maxY && draggedRect.minY < $0.maxY }
+
+        let beforeSibling = rowSiblings.filter { $0.maxX <= draggedRect.minX }.max { $0.maxX < $1.maxX }
+        let afterSibling = rowSiblings.filter { $0.minX >= draggedRect.maxX }.min { $0.minX < $1.minX }
+        let before = beforeSibling.map { SpacingNeighbor(edge: $0.maxX, crossRect: $0) } ?? SpacingNeighbor(edge: boardRect.minX, crossRect: boardRect)
+        let after = afterSibling.map { SpacingNeighbor(edge: $0.minX, crossRect: $0) } ?? SpacingNeighbor(edge: boardRect.maxX, crossRect: boardRect)
+
+        let gapBefore = draggedRect.minX - before.edge
+        let gapAfter = after.edge - draggedRect.maxX
+
+        func cross(_ a: CGRect, _ b: CGRect) -> Double { (max(a.minY, b.minY) + min(a.maxY, b.maxY)) / 2 }
+
+        // Case A: sandwiched — a near-equal gap on both sides. Either side
+        // (or both) may be the board's own edge instead of another item.
+        if gapBefore > 0, gapAfter > 0, abs(gapBefore - gapAfter) <= threshold {
+            let targetStart = (before.edge + after.edge - draggedRect.width) / 2
+            let targetEnd = targetStart + draggedRect.width
+            return (targetStart - draggedRect.minX, [
+                SmartSpacingGap(axis: .horizontal, start: before.edge, end: targetStart, cross: cross(before.crossRect, draggedRect)),
+                SmartSpacingGap(axis: .horizontal, start: targetEnd, end: after.edge, cross: cross(after.crossRect, draggedRect))
+            ])
+        }
+
+        // Case B: extend a rhythm — only meaningful when the near neighbor
+        // is a real item (a board edge has no "own gap" beyond itself to
+        // match against), but what's *beyond* that neighbor can still fall
+        // back to the board edge.
+        if gapBefore > 0, let beforeSibling {
+            let earlierSibling = rowSiblings.filter { $0.maxX <= beforeSibling.minX }.max { $0.maxX < $1.maxX }
+            let earlierEdge = earlierSibling?.maxX ?? boardRect.minX
+            let earlierCrossRect = earlierSibling ?? boardRect
+            let referenceGap = beforeSibling.minX - earlierEdge
+            if referenceGap > 0, abs(gapBefore - referenceGap) <= threshold {
+                let targetStart = before.edge + referenceGap
+                return (targetStart - draggedRect.minX, [
+                    SmartSpacingGap(axis: .horizontal, start: earlierEdge, end: beforeSibling.minX, cross: cross(earlierCrossRect, beforeSibling)),
+                    SmartSpacingGap(axis: .horizontal, start: before.edge, end: targetStart, cross: cross(before.crossRect, draggedRect))
+                ])
+            }
+        }
+        if gapAfter > 0, let afterSibling {
+            let furtherSibling = rowSiblings.filter { $0.minX >= afterSibling.maxX }.min { $0.minX < $1.minX }
+            let furtherEdge = furtherSibling?.minX ?? boardRect.maxX
+            let furtherCrossRect = furtherSibling ?? boardRect
+            let referenceGap = furtherEdge - afterSibling.maxX
+            if referenceGap > 0, abs(gapAfter - referenceGap) <= threshold {
+                let targetEnd = after.edge - referenceGap
+                let targetStart = targetEnd - draggedRect.width
+                return (targetStart - draggedRect.minX, [
+                    SmartSpacingGap(axis: .horizontal, start: targetEnd, end: after.edge, cross: cross(after.crossRect, draggedRect)),
+                    SmartSpacingGap(axis: .horizontal, start: afterSibling.maxX, end: furtherEdge, cross: cross(afterSibling, furtherCrossRect))
+                ])
+            }
+        }
+
+        return nil
+    }
+
+    /// The vertical counterpart to `horizontalSpacingMatch` — column
+    /// spacing between items stacked above/below the dragged rect (or the
+    /// board's own top/bottom edge), same two cases and the same
+    /// board-edge fallback, with X and Y swapped.
+    private func verticalSpacingMatch(draggedRect: CGRect, siblings: [CGRect], boardRect: CGRect, threshold: Double) -> (adjustment: Double, gaps: [SmartSpacingGap])? {
+        let columnSiblings = siblings.filter { $0.minX < draggedRect.maxX && draggedRect.minX < $0.maxX }
+
+        let aboveSibling = columnSiblings.filter { $0.maxY <= draggedRect.minY }.max { $0.maxY < $1.maxY }
+        let belowSibling = columnSiblings.filter { $0.minY >= draggedRect.maxY }.min { $0.minY < $1.minY }
+        let above = aboveSibling.map { SpacingNeighbor(edge: $0.maxY, crossRect: $0) } ?? SpacingNeighbor(edge: boardRect.minY, crossRect: boardRect)
+        let below = belowSibling.map { SpacingNeighbor(edge: $0.minY, crossRect: $0) } ?? SpacingNeighbor(edge: boardRect.maxY, crossRect: boardRect)
+
+        let gapAbove = draggedRect.minY - above.edge
+        let gapBelow = below.edge - draggedRect.maxY
+
+        func cross(_ a: CGRect, _ b: CGRect) -> Double { (max(a.minX, b.minX) + min(a.maxX, b.maxX)) / 2 }
+
+        if gapAbove > 0, gapBelow > 0, abs(gapAbove - gapBelow) <= threshold {
+            let targetStart = (above.edge + below.edge - draggedRect.height) / 2
+            let targetEnd = targetStart + draggedRect.height
+            return (targetStart - draggedRect.minY, [
+                SmartSpacingGap(axis: .vertical, start: above.edge, end: targetStart, cross: cross(above.crossRect, draggedRect)),
+                SmartSpacingGap(axis: .vertical, start: targetEnd, end: below.edge, cross: cross(below.crossRect, draggedRect))
+            ])
+        }
+
+        if gapAbove > 0, let aboveSibling {
+            let earlierSibling = columnSiblings.filter { $0.maxY <= aboveSibling.minY }.max { $0.maxY < $1.maxY }
+            let earlierEdge = earlierSibling?.maxY ?? boardRect.minY
+            let earlierCrossRect = earlierSibling ?? boardRect
+            let referenceGap = aboveSibling.minY - earlierEdge
+            if referenceGap > 0, abs(gapAbove - referenceGap) <= threshold {
+                let targetStart = above.edge + referenceGap
+                return (targetStart - draggedRect.minY, [
+                    SmartSpacingGap(axis: .vertical, start: earlierEdge, end: aboveSibling.minY, cross: cross(earlierCrossRect, aboveSibling)),
+                    SmartSpacingGap(axis: .vertical, start: above.edge, end: targetStart, cross: cross(above.crossRect, draggedRect))
+                ])
+            }
+        }
+        if gapBelow > 0, let belowSibling {
+            let furtherSibling = columnSiblings.filter { $0.minY >= belowSibling.maxY }.min { $0.minY < $1.minY }
+            let furtherEdge = furtherSibling?.minY ?? boardRect.maxY
+            let furtherCrossRect = furtherSibling ?? boardRect
+            let referenceGap = furtherEdge - belowSibling.maxY
+            if referenceGap > 0, abs(gapBelow - referenceGap) <= threshold {
+                let targetEnd = below.edge - referenceGap
+                let targetStart = targetEnd - draggedRect.height
+                return (targetStart - draggedRect.minY, [
+                    SmartSpacingGap(axis: .vertical, start: targetEnd, end: below.edge, cross: cross(below.crossRect, draggedRect)),
+                    SmartSpacingGap(axis: .vertical, start: belowSibling.maxY, end: furtherEdge, cross: cross(belowSibling, furtherCrossRect))
+                ])
+            }
+        }
+
+        return nil
+    }
+
+    /// The horizontal gaps immediately left and right of `rowAnchor` within
+    /// its own row (items overlapping it vertically) — the candidate
+    /// reference gaps `crossAxisSpacingMatch` compares a vertical gap
+    /// against.
+    private func rowGapCandidates(around rowAnchor: CGRect, siblings: [CGRect]) -> [(start: Double, end: Double, gap: Double)] {
+        let row = siblings.filter { $0.minY < rowAnchor.maxY && rowAnchor.minY < $0.maxY }
+        var candidates: [(start: Double, end: Double, gap: Double)] = []
+        if let left = row.filter({ $0.maxX <= rowAnchor.minX }).max(by: { $0.maxX < $1.maxX }) {
+            let gap = rowAnchor.minX - left.maxX
+            if gap > 0 { candidates.append((left.maxX, rowAnchor.minX, gap)) }
+        }
+        if let right = row.filter({ $0.minX >= rowAnchor.maxX }).min(by: { $0.minX < $1.minX }) {
+            let gap = right.minX - rowAnchor.maxX
+            if gap > 0 { candidates.append((rowAnchor.maxX, right.minX, gap)) }
+        }
+        return candidates
+    }
+
+    /// The grid-rhythm case `verticalSpacingMatch` doesn't cover: matching
+    /// the vertical gap to the row above or below not against another
+    /// *vertical* gap, but against the *horizontal* gap already established
+    /// between items within that row — so a new row starts at the same
+    /// margin as the column spacing already in use, the way a real contact
+    /// sheet usually has one consistent gap in both directions. Only
+    /// attempted when `verticalSpacingMatch` found no same-axis match, so a
+    /// real vertical rhythm (if one exists) still takes priority.
+    private func crossAxisSpacingMatch(draggedRect: CGRect, siblings: [CGRect], threshold: Double) -> (adjustment: Double, gaps: [SmartSpacingGap])? {
+        let columnSiblings = siblings.filter { $0.minX < draggedRect.maxX && draggedRect.minX < $0.maxX }
+
+        if let above = columnSiblings.filter({ $0.maxY <= draggedRect.minY }).max(by: { $0.maxY < $1.maxY }) {
+            let verticalGap = draggedRect.minY - above.maxY
+            if verticalGap > 0,
+               let best = rowGapCandidates(around: above, siblings: siblings).min(by: { abs($0.gap - verticalGap) < abs($1.gap - verticalGap) }),
+               abs(verticalGap - best.gap) <= threshold {
+                let targetStart = above.maxY + best.gap
+                let verticalCross = (max(above.minX, draggedRect.minX) + min(above.maxX, draggedRect.maxX)) / 2
+                return (targetStart - draggedRect.minY, [
+                    SmartSpacingGap(axis: .horizontal, start: best.start, end: best.end, cross: above.midY),
+                    SmartSpacingGap(axis: .vertical, start: above.maxY, end: targetStart, cross: verticalCross)
+                ])
+            }
+        }
+
+        if let below = columnSiblings.filter({ $0.minY >= draggedRect.maxY }).min(by: { $0.minY < $1.minY }) {
+            let verticalGap = below.minY - draggedRect.maxY
+            if verticalGap > 0,
+               let best = rowGapCandidates(around: below, siblings: siblings).min(by: { abs($0.gap - verticalGap) < abs($1.gap - verticalGap) }),
+               abs(verticalGap - best.gap) <= threshold {
+                let targetEnd = below.minY - best.gap
+                let targetStart = targetEnd - draggedRect.height
+                let verticalCross = (max(below.minX, draggedRect.minX) + min(below.maxX, draggedRect.maxX)) / 2
+                return (targetStart - draggedRect.minY, [
+                    SmartSpacingGap(axis: .vertical, start: targetEnd, end: below.minY, cross: verticalCross),
+                    SmartSpacingGap(axis: .horizontal, start: best.start, end: best.end, cross: below.midY)
+                ])
+            }
+        }
+
+        return nil
     }
 
     private enum AxisSnapSource {
@@ -667,6 +889,10 @@ struct ImageCardView: View {
             .onChanged { value in
                 let baseline = dragBaseline ?? (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 if dragBaseline == nil { dragBaseline = baseline }
+                // Resize never produces equal-spacing matches (move-only,
+                // per its own scope) — always clear so a stale arrow from a
+                // prior move doesn't linger into a resize.
+                document.activeSpacingGaps = []
 
                 let isCenterScale = NSEvent.modifierFlags.contains(.option)
                 let isGroupScale = NSEvent.modifierFlags.contains(.command)
@@ -776,6 +1002,7 @@ struct ImageCardView: View {
                 document.groupResizeAnchor = nil
                 document.groupResizeSourceID = nil
                 document.activeSmartGuides = []
+                document.activeSpacingGaps = []
                 document.save()
             }
     }
