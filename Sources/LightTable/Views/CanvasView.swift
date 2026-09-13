@@ -29,6 +29,7 @@ struct CanvasView: View {
     var onChangeFolder: () -> Void
 
     @State private var cropModeItemID: UUID?
+    @State private var inlineCropItemID: UUID?
     @State private var textFormatItemID: UUID?
     @State private var showRenameSheet = false
     @State private var showCreateGridSheet = false
@@ -240,6 +241,9 @@ struct CanvasView: View {
             .contentShape(Rectangle())
             .clipped()
             .onTapGesture {
+                if inlineCropItemID != nil {
+                    inlineCropItemID = nil
+                }
                 document.selectedIDs = []
                 document.selectedGuideID = nil
                 if textFormatItemID != nil {
@@ -602,7 +606,7 @@ struct CanvasView: View {
 
     private var itemCardsLayer: some View {
         ForEach(document.items) { item in
-            ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, smartGuidesEnabled: smartGuidesEnabled, boardOrigin: boardOrigin(for: item.boardIndex))
+            ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, inlineCropItemID: $inlineCropItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, smartGuidesEnabled: smartGuidesEnabled, boardOrigin: boardOrigin(for: item.boardIndex))
         }
     }
 
@@ -1101,10 +1105,14 @@ struct CanvasView: View {
             // that editing happens in this same window rather than a
             // separate sheet). Escape is the one exception: it explicitly
             // ends the editing session.
-            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else {
+            guard cropModeItemID == nil, textFormatItemID == nil, inlineCropItemID == nil, !showRenameSheet else {
                 if textFormatItemID != nil, event.keyCode == 53 {
                     textFormatItemID = nil
                     document.save()
+                    return nil
+                }
+                if inlineCropItemID != nil, event.keyCode == 53 {
+                    inlineCropItemID = nil
                     return nil
                 }
                 return event
@@ -1226,7 +1234,7 @@ struct CanvasView: View {
     private func installScrollMonitor() {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             guard event.window === hostWindow else { return event }
-            guard cropModeItemID == nil, textFormatItemID == nil, !showRenameSheet else { return event }
+            guard cropModeItemID == nil, textFormatItemID == nil, inlineCropItemID == nil, !showRenameSheet else { return event }
 
             if event.modifierFlags.contains(.command) {
                 let sensitivity: CGFloat = 0.0025

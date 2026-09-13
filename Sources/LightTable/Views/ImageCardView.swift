@@ -9,6 +9,7 @@ struct ImageCardView: View {
     @ObservedObject var document: CanvasDocument
     let itemID: UUID
     @Binding var cropModeItemID: UUID?
+    @Binding var inlineCropItemID: UUID?
     @Binding var textFormatItemID: UUID?
     let showFilenames: Bool
     let zoom: CGFloat
@@ -35,6 +36,17 @@ struct ImageCardView: View {
     @State private var isReplaceDropTargeted = false
     @ObservedObject private var shadowSettings = ShadowSettings.shared
 
+    /// Live (uncommitted) state for the inline crop overlay — the crop
+    /// frame and the underlying image's own rect, both in the shared
+    /// display space. Nil until the overlay first appears for this item;
+    /// committed into the item's real fields (and reset to nil) whenever
+    /// `inlineCropItemID` moves away from this item.
+    @State private var inlineFrameRect: CGRect?
+    @State private var inlineImageRect: CGRect?
+    @State private var inlineFrameBaseline: CGRect?
+    @State private var inlineImageBaseline: CGRect?
+    @State private var inlineImageAspect: Double?
+
     private let minSize: Double = 40
 
     private var item: CanvasItem? {
@@ -45,6 +57,8 @@ struct ImageCardView: View {
         if let item {
             if item.kind == .text, textFormatItemID == itemID {
                 editingTextCard(item: item)
+            } else if item.kind == .image, inlineCropItemID == itemID {
+                inlineCroppingCard(item: item)
             } else {
                 interactiveCard(item: item)
             }
@@ -75,7 +89,8 @@ struct ImageCardView: View {
                     )
                     .gesture(moveGesture)
                     .onTapGesture(count: 2) {
-                        if item.kind == .text { beginEditingText() } else { cropModeItemID = itemID }
+                        if let current = inlineCropItemID, current != itemID { inlineCropItemID = nil }
+                        if item.kind == .text { beginEditingText() } else { inlineCropItemID = itemID }
                     }
                     .onTapGesture { selectOnTap() }
                     .contextMenu {
@@ -270,6 +285,11 @@ struct ImageCardView: View {
         if let current = textFormatItemID, current != itemID {
             textFormatItemID = nil
             document.save()
+        }
+        // Same idea for another card's inline crop overlay — clicking
+        // elsewhere commits and closes it.
+        if let current = inlineCropItemID, current != itemID {
+            inlineCropItemID = nil
         }
         document.selectedGuideID = nil
         let modifiers = NSEvent.modifierFlags
@@ -1181,5 +1201,394 @@ struct ImageCardView: View {
         if !isRight { scale = min(scale, baseline.maxX / baseline.width) }
         if !isBottom { scale = min(scale, baseline.maxY / baseline.height) }
         return max(scale, minScale)
+    }
+
+    // MARK: - Inline crop overlay
+
+    /// Double-click's freeform crop overlay: an outer box (the crop frame,
+    /// reusing the app's usual white selection-handle look) that can be
+    /// resized independently on each axis, and an inner box (the source
+    /// image itself, reusing the crop dialogue's accent-coloured handle
+    /// look) that can be moved and scaled — proportionally only — anywhere
+    /// relative to the frame, including past its edges. Clicking away
+    /// (handled by `inlineCropItemID` changing to something else, watched
+    /// below) commits the two boxes into the same non-destructive
+    /// `cropX/Y/width/height` fields the "Crop" dialogue writes, with no
+    /// file ever touched here.
+    private func inlineCroppingCard(item: CanvasItem) -> some View {
+        let frame = inlineFrameRect ?? item.frame.offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
+        let imageRect = inlineImageRect ?? Self.initialImageRect(frame: frame, crop: item.cropRect)
+        let fileURL = document.folderURL.appendingPathComponent(item.filename)
+        let nsImage = ImageCache.shared.image(for: fileURL)
+        let previewItem = Self.previewItem(item, frame: frame, imageRect: imageRect)
+
+        return ZStack(alignment: .topLeading) {
+            if let nsImage {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .frame(width: imageRect.width, height: imageRect.height)
+                    .position(x: imageRect.midX, y: imageRect.midY)
+                    .opacity(0.35)
+                    .contentShape(Rectangle())
+                    .gesture(inlineImageMoveGesture)
+            }
+
+            CroppedImageView(document: document, item: previewItem, width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+                .allowsHitTesting(false)
+
+            // Doubled stroke (a wider dark line behind a narrower light one)
+            // so the crop frame reads against a background of any
+            // brightness — a plain white line disappears entirely against
+            // a white board.
+            Rectangle()
+                .stroke(Color.black.opacity(0.65), lineWidth: 3.5)
+                .frame(width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+                .allowsHitTesting(false)
+            Rectangle()
+                .stroke(Color.white, lineWidth: 1.5)
+                .frame(width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+                .allowsHitTesting(false)
+
+            Rectangle()
+                .stroke(Color.black.opacity(0.5), lineWidth: 3)
+                .frame(width: imageRect.width, height: imageRect.height)
+                .position(x: imageRect.midX, y: imageRect.midY)
+                .allowsHitTesting(false)
+            Rectangle()
+                .stroke(Color.accentColor, lineWidth: 1.5)
+                .frame(width: imageRect.width, height: imageRect.height)
+                .position(x: imageRect.midX, y: imageRect.midY)
+                .allowsHitTesting(false)
+
+            ForEach(CardCorner.allCases, id: \.self) { corner in
+                inlineFrameHandle(corner, frame: frame)
+            }
+            ForEach(CardCorner.allCases, id: \.self) { corner in
+                inlineImageHandle(corner, imageRect: imageRect)
+            }
+        }
+        .onAppear {
+            if inlineFrameRect == nil { inlineFrameRect = frame }
+            if inlineImageRect == nil { inlineImageRect = imageRect }
+            if inlineImageAspect == nil {
+                if let pixelSize = ImageFileSupport.pixelSize(of: fileURL), pixelSize.width > 0, pixelSize.height > 0 {
+                    inlineImageAspect = pixelSize.width / pixelSize.height
+                } else if imageRect.height > 0 {
+                    inlineImageAspect = imageRect.width / imageRect.height
+                }
+            }
+        }
+        // `.onChange(of: inlineCropItemID)` looked like the natural way to
+        // detect "clicked away", but SwiftUI doesn't reliably deliver it:
+        // the moment `inlineCropItemID` changes, `body`'s conditional swaps
+        // this whole branch out for `interactiveCard` in the very same
+        // update, and a view being removed by the same state change that
+        // would've triggered its own onChange often never gets the
+        // callback. `onDisappear` is the modifier actually meant for "this
+        // view is leaving the hierarchy" and fires reliably regardless of
+        // why — that covers this, plus the item being deleted or the board
+        // changing while mid-edit.
+        .onDisappear {
+            commitInlineCrop()
+        }
+    }
+
+    private func inlineFrameHandle(_ corner: CardCorner, frame: CGRect) -> some View {
+        let point: CGPoint
+        switch corner {
+        case .topLeft: point = CGPoint(x: frame.minX, y: frame.minY)
+        case .topRight: point = CGPoint(x: frame.maxX, y: frame.minY)
+        case .bottomLeft: point = CGPoint(x: frame.minX, y: frame.maxY)
+        case .bottomRight: point = CGPoint(x: frame.maxX, y: frame.maxY)
+        }
+        return Circle()
+            .fill(Color.white)
+            .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+            .frame(width: 14, height: 14)
+            .position(point)
+            .gesture(inlineFrameCornerGesture(corner))
+    }
+
+    private func inlineImageHandle(_ corner: CardCorner, imageRect: CGRect) -> some View {
+        let point: CGPoint
+        switch corner {
+        case .topLeft: point = CGPoint(x: imageRect.minX, y: imageRect.minY)
+        case .topRight: point = CGPoint(x: imageRect.maxX, y: imageRect.minY)
+        case .bottomLeft: point = CGPoint(x: imageRect.minX, y: imageRect.maxY)
+        case .bottomRight: point = CGPoint(x: imageRect.maxX, y: imageRect.maxY)
+        }
+        return Circle()
+            .fill(Color.accentColor)
+            .overlay(Circle().stroke(Color.white, lineWidth: 2))
+            .frame(width: 14, height: 14)
+            .position(point)
+            .gesture(inlineImageCornerGesture(corner))
+    }
+
+    /// Plain translate, unclamped — the image is explicitly allowed to move
+    /// past the frame's edges (or shrink smaller than it) since that's what
+    /// crops it.
+    private var inlineImageMoveGesture: some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
+            .onChanged { value in
+                let baseline = inlineImageBaseline ?? inlineImageRect ?? .zero
+                if inlineImageBaseline == nil { inlineImageBaseline = baseline }
+                inlineImageRect = baseline.offsetBy(dx: value.translation.width, dy: value.translation.height)
+            }
+            .onEnded { _ in inlineImageBaseline = nil }
+    }
+
+    /// Freeform (independent width/height) resize of the crop frame —
+    /// `freeResizeRect`'s own logic, then snapped to ruler guides and the
+    /// board's own edges (`guideSnappedFrameRect`), then further
+    /// smart-guide-snapped against siblings and the board's center
+    /// (`inlineFrameSmartSnap`) — the same two-stage order plain resize
+    /// already uses (`adjustedRect`'s own guide snap, then
+    /// `smartSnappedResize` on top).
+    private func inlineFrameCornerGesture(_ corner: CardCorner) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
+            .onChanged { value in
+                let baseline = inlineFrameBaseline ?? inlineFrameRect ?? .zero
+                if inlineFrameBaseline == nil { inlineFrameBaseline = baseline }
+                var rect = freeResizeRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height)
+                rect = guideSnappedFrameRect(rect, corner: corner)
+                let (snapped, guides) = inlineFrameSmartSnap(rect: rect, corner: corner)
+                inlineFrameRect = snapped
+                document.activeSmartGuides = guides
+            }
+            .onEnded { _ in
+                inlineFrameBaseline = nil
+                document.activeSmartGuides = []
+            }
+    }
+
+    /// Snaps the frame corner's own free edges to the nearest ruler guide
+    /// or the board's own edge, independently per axis — the freeform
+    /// equivalent of `snappedScale`'s guide/board-edge snap, just moving one
+    /// edge directly instead of solving for a locked-aspect scale.
+    private func guideSnappedFrameRect(_ rect: CGRect, corner: CardCorner) -> CGRect {
+        let threshold = 8.0 / max(zoom, 0.01)
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+        var result = rect
+
+        if let matchX = Self.nearestGuideMatch(document.verticalGuides.map(\.position) + boardEdgeXPositions, edges: [isRight ? rect.maxX : rect.minX], threshold: threshold) {
+            let delta = matchX.guidePosition - matchX.edgeValue
+            if isRight {
+                result.size.width += delta
+            } else {
+                result.origin.x += delta
+                result.size.width -= delta
+            }
+        }
+        if let matchY = Self.nearestGuideMatch(document.horizontalGuides.map(\.position) + boardEdgeYPositions, edges: [isBottom ? rect.maxY : rect.minY], threshold: threshold) {
+            let delta = matchY.guidePosition - matchY.edgeValue
+            if isBottom {
+                result.size.height += delta
+            } else {
+                result.origin.y += delta
+                result.size.height -= delta
+            }
+        }
+
+        if result.width < minSize {
+            if isRight { result.size.width = minSize } else {
+                result.origin.x = result.maxX - minSize
+                result.size.width = minSize
+            }
+        }
+        if result.height < minSize {
+            if isBottom { result.size.height = minSize } else {
+                result.origin.y = result.maxY - minSize
+                result.size.height = minSize
+            }
+        }
+        return result
+    }
+
+    /// Smart-guide snapping for the crop frame's freeform resize — unlike
+    /// `smartSnappedResize` (which locks the two axes together via one
+    /// uniform scale, for an aspect-locked image resize), the frame's two
+    /// axes are independent, so X and Y are matched and snapped separately
+    /// and can both apply at once. Mirrors `smartAlignedOffset`'s per-axis
+    /// `bestAxisSnap` (board center takes priority over a sibling edge),
+    /// just applied to the corner's own free edge instead of a translation.
+    private func inlineFrameSmartSnap(rect: CGRect, corner: CardCorner) -> (CGRect, [SmartAlignmentGuide]) {
+        guard smartGuidesEnabled, let item else { return (rect, []) }
+        let siblings = siblingRects(excluding: [itemID], onBoard: item.boardIndex)
+        let threshold = 6.0 / max(zoom, 0.01)
+        let boardRect = currentBoardRect
+
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+        let freeX = isRight ? rect.maxX : rect.minX
+        let freeY = isBottom ? rect.maxY : rect.minY
+
+        let siblingMatchX = bestSiblingMatch(siblings, draggedValues: [freeX], threshold: threshold) { [$0.minX, $0.midX, $0.maxX] }
+        let bestX = bestAxisSnap(siblingMatch: siblingMatchX, draggedCenter: freeX, boardCenter: boardRect.midX, threshold: threshold)
+
+        let siblingMatchY = bestSiblingMatch(siblings, draggedValues: [freeY], threshold: threshold) { [$0.minY, $0.midY, $0.maxY] }
+        let bestY = bestAxisSnap(siblingMatch: siblingMatchY, draggedCenter: freeY, boardCenter: boardRect.midY, threshold: threshold)
+
+        var result = rect
+        var guides: [SmartAlignmentGuide] = []
+
+        if let bestX {
+            if isRight {
+                let newMaxX = max(bestX.target, result.minX + minSize)
+                result.size.width = newMaxX - result.minX
+            } else {
+                let newMinX = min(bestX.target, result.maxX - minSize)
+                result.size.width = result.maxX - newMinX
+                result.origin.x = newMinX
+            }
+            let (kind, spanY0, spanY1): (SmartAlignmentGuideKind, Double, Double)
+            switch bestX.source {
+            case .sibling(let sRect): (kind, spanY0, spanY1) = (.sibling, sRect.minY, sRect.maxY)
+            case .boardCenter: (kind, spanY0, spanY1) = (.boardCenter, boardRect.minY, boardRect.maxY)
+            }
+            guides.append(SmartAlignmentGuide(orientation: .vertical, kind: kind, position: bestX.target, start: min(result.minY, spanY0), end: max(result.maxY, spanY1)))
+        }
+        if let bestY {
+            if isBottom {
+                let newMaxY = max(bestY.target, result.minY + minSize)
+                result.size.height = newMaxY - result.minY
+            } else {
+                let newMinY = min(bestY.target, result.maxY - minSize)
+                result.size.height = result.maxY - newMinY
+                result.origin.y = newMinY
+            }
+            let (kind, spanX0, spanX1): (SmartAlignmentGuideKind, Double, Double)
+            switch bestY.source {
+            case .sibling(let sRect): (kind, spanX0, spanX1) = (.sibling, sRect.minX, sRect.maxX)
+            case .boardCenter: (kind, spanX0, spanX1) = (.boardCenter, boardRect.minX, boardRect.maxX)
+            }
+            guides.append(SmartAlignmentGuide(orientation: .horizontal, kind: kind, position: bestY.target, start: min(result.minX, spanX0), end: max(result.maxX, spanX1)))
+        }
+
+        return (result, guides)
+    }
+
+    /// Aspect-locked resize of the image itself, anchored at the opposite
+    /// corner — no edge clamp, since the image is free to grow past the
+    /// frame or shrink well below it.
+    private func inlineImageCornerGesture(_ corner: CardCorner) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
+            .onChanged { value in
+                let baseline = inlineImageBaseline ?? inlineImageRect ?? .zero
+                if inlineImageBaseline == nil { inlineImageBaseline = baseline }
+                let aspect = inlineImageAspect ?? (baseline.height > 0 ? baseline.width / baseline.height : 1)
+                inlineImageRect = imageAspectResizeRect(baseline: baseline, corner: corner, dx: value.translation.width, dy: value.translation.height, aspect: aspect)
+            }
+            .onEnded { _ in inlineImageBaseline = nil }
+    }
+
+    /// Same anchor-preserving corner math as `adjustedRect`, but with no
+    /// canvas-edge clamp (the image rect is a free-floating overlay, not an
+    /// item position) and a smaller floor so a heavily cropped-in image can
+    /// still be pulled down to a sensible minimum.
+    private func imageAspectResizeRect(baseline: CGRect, corner: CardCorner, dx: Double, dy: Double, aspect: Double) -> CGRect {
+        guard baseline.width > 0, baseline.height > 0, aspect > 0 else { return baseline }
+        let isRight = corner == .topRight || corner == .bottomRight
+        let isBottom = corner == .bottomLeft || corner == .bottomRight
+
+        let widthRaw = baseline.width + (isRight ? dx : -dx)
+        let heightRaw = baseline.height + (isBottom ? dy : -dy)
+        let minScale = max(minSize / baseline.width, minSize / baseline.height)
+        let scale = max(widthRaw / baseline.width, heightRaw / baseline.height, minScale)
+
+        let width = baseline.width * scale
+        let height = width / aspect
+
+        let anchorX = isRight ? baseline.minX : baseline.maxX
+        let anchorY = isBottom ? baseline.minY : baseline.maxY
+        let x = isRight ? anchorX : anchorX - width
+        let y = isBottom ? anchorY : anchorY - height
+
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Where the full (uncropped) image currently sits, in the shared
+    /// display space, given the frame it's shown through and the item's
+    /// stored (normalized, source-image-space) crop rect — the inverse of
+    /// `CroppedImageView`'s own placement math.
+    private static func initialImageRect(frame: CGRect, crop: CGRect) -> CGRect {
+        guard crop.width > 0, crop.height > 0 else { return frame }
+        let innerWidth = frame.width / crop.width
+        let innerHeight = frame.height / crop.height
+        let x = frame.minX - crop.minX * innerWidth
+        let y = frame.minY - crop.minY * innerHeight
+        return CGRect(x: x, y: y, width: innerWidth, height: innerHeight)
+    }
+
+    /// The inverse of `initialImageRect`: the normalized crop rect implied
+    /// by showing the full image at `imageRect` through a mask at `frame`.
+    private static func liveCropRect(frame: CGRect, imageRect: CGRect) -> CGRect {
+        guard imageRect.width > 0, imageRect.height > 0, frame.width > 0, frame.height > 0 else {
+            return CGRect(x: 0, y: 0, width: 1, height: 1)
+        }
+        let width = frame.width / imageRect.width
+        let height = frame.height / imageRect.height
+        let x = -(imageRect.minX - frame.minX) / imageRect.width
+        let y = -(imageRect.minY - frame.minY) / imageRect.height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// A throwaway copy of `item` carrying the live (uncommitted) crop, used
+    /// only to feed `CroppedImageView` an accurate preview of the frame's
+    /// contents while dragging.
+    private static func previewItem(_ item: CanvasItem, frame: CGRect, imageRect: CGRect) -> CanvasItem {
+        var copy = item
+        let crop = liveCropRect(frame: frame, imageRect: imageRect)
+        copy.cropX = crop.minX
+        copy.cropY = crop.minY
+        copy.cropWidth = crop.width
+        copy.cropHeight = crop.height
+        return copy
+    }
+
+    /// Writes the overlay's current frame/image rects into the item's real,
+    /// non-destructive crop fields — the same fields the "Crop" dialogue's
+    /// "Apply" button writes — then clears the overlay's live state. A
+    /// double-click followed immediately by clicking away (no drag at all)
+    /// is a no-op rather than an empty undo step.
+    private func commitInlineCrop() {
+        defer {
+            inlineFrameRect = nil
+            inlineImageRect = nil
+            inlineFrameBaseline = nil
+            inlineImageBaseline = nil
+            inlineImageAspect = nil
+            document.activeSmartGuides = []
+        }
+        guard let item, let frame = inlineFrameRect, let imageRect = inlineImageRect else { return }
+        let localFrame = frame.offsetBy(dx: -boardOrigin.x, dy: -boardOrigin.y)
+        let crop = Self.liveCropRect(frame: frame, imageRect: imageRect)
+
+        let unchanged = abs(localFrame.minX - item.x) < 0.01
+            && abs(localFrame.minY - item.y) < 0.01
+            && abs(localFrame.width - item.width) < 0.01
+            && abs(localFrame.height - item.height) < 0.01
+            && abs(crop.minX - item.cropX) < 0.0001
+            && abs(crop.minY - item.cropY) < 0.0001
+            && abs(crop.width - item.cropWidth) < 0.0001
+            && abs(crop.height - item.cropHeight) < 0.0001
+        guard !unchanged else { return }
+
+        document.registerUndoCheckpoint(actionName: "Crop")
+        document.updateItem(itemID) { current in
+            current.x = localFrame.minX
+            current.y = localFrame.minY
+            current.width = localFrame.width
+            current.height = localFrame.height
+            current.cropX = crop.minX
+            current.cropY = crop.minY
+            current.cropWidth = crop.width
+            current.cropHeight = crop.height
+        }
+        document.save()
     }
 }

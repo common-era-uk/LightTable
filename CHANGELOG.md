@@ -2,6 +2,10 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.6 — 2026-09-13
+
+- Double-clicking an image now opens a quick, on-canvas crop — drag its box to change what's visible, and move or resize the photo inside it (kept in proportion), even past the box's edges. Click elsewhere to apply. Snaps to nearby images, the board's centre and edges, and any guides, just like a normal move or resize.
+
 ## 1.1.5 — 2026-09-13
 
 - Added smart alignment guides — while dragging an image or text item (or resizing a single image), pink lines appear when an edge or centre lines up with another item, and green ones when it lines up with the board's own centre; both snap the drag into place, like PowerPoint or Keynote.
