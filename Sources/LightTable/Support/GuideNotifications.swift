@@ -32,4 +32,5 @@ extension Notification.Name {
     static let copySelected = Notification.Name("LightTable.copySelected")
     static let pasteSelected = Notification.Name("LightTable.pasteSelected")
     static let toggleSmartGuides = Notification.Name("LightTable.toggleSmartGuides")
+    static let toggleImageCount = Notification.Name("LightTable.toggleImageCount")
 }

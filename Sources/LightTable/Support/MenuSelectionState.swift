@@ -14,5 +14,6 @@ final class MenuSelectionState: ObservableObject {
     @Published var hasMultipleSelected = false
     @Published var showGuides = true
     @Published var smartGuidesEnabled = true
+    @Published var showImageCount = false
     private init() {}
 }

@@ -2,6 +2,12 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.7 — 2026-10-04
+
+- Simplified the toolbar — removed the Board Size, Open Folder and Rename All buttons, which are all still in the menus.
+- Added View > Show Image Count — shows how many images are on each art board, next to its number.
+- View > Toggle Shadows now reads "Turn Shadows On" or "Turn Shadows Off" to match its current state.
+
 ## 1.1.6 — 2026-09-13
 
 - Double-clicking an image now opens a quick, on-canvas crop — drag its box to change what's visible, and move or resize the photo inside it (kept in proportion), even past the box's edges. Click elsewhere to apply. Snaps to nearby images, the board's centre and edges, and any guides, just like a normal move or resize.

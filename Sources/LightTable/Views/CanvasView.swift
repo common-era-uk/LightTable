@@ -61,6 +61,7 @@ struct CanvasView: View {
     @State private var showFilenames = false
     @State private var showGuides = true
     @State private var smartGuidesEnabled = true
+    @State private var showImageCount = false
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
     @State private var exportFormatCoordinator: ExportFormatCoordinator?
     @State private var keyMonitor: Any?
@@ -352,20 +353,6 @@ struct CanvasView: View {
                 }
                 .disabled(document.items.isEmpty)
                 .help("Save whole canvas as an image")
-                Divider()
-                Button("Board Size…", systemImage: "rectangle.arrowtriangle.2.outward") {
-                    showBoardSizeDialog = true
-                }
-                .help("Choose Auto or Fixed sizing for art boards")
-                Button("Open Folder…", systemImage: "folder") {
-                    onChangeFolder()
-                }
-                .help("Open a different folder")
-                Button("Rename All…", systemImage: "r.square.on.square") {
-                    showRenameSheet = true
-                }
-                .disabled(document.items.isEmpty)
-                .help("Rename all images in sequence")
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleShowGuides)) { _ in
@@ -382,6 +369,11 @@ struct CanvasView: View {
                 document.activeSpacingGaps = []
             }
             MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleImageCount)) { _ in
+            guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
+            showImageCount.toggle()
+            MenuSelectionState.shared.showImageCount = showImageCount
         }
         .onReceive(NotificationCenter.default.publisher(for: .openGuideColorPicker)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
@@ -424,9 +416,7 @@ struct CanvasView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard let window = note.object as? NSWindow, window === hostWindow else { return }
-            MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
-            MenuSelectionState.shared.showGuides = showGuides
-            MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
+            syncMenuState()
         }
         .onAppear {
             installKeyMonitor()
@@ -436,9 +426,7 @@ struct CanvasView: View {
             // onChange below covers that second case.
             hostWindow?.representedURL = document.ltFileURL
             if hostWindow != nil, hostWindow === NSApp.keyWindow {
-                MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
-                MenuSelectionState.shared.showGuides = showGuides
-                MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
+                syncMenuState()
             }
         }
         .onDisappear {
@@ -452,9 +440,7 @@ struct CanvasView: View {
             // the .lt file's full path, exactly like any document window.
             newWindow?.representedURL = document.ltFileURL
             if newWindow != nil, newWindow === NSApp.keyWindow {
-                MenuSelectionState.shared.hasMultipleSelected = document.selectedIDs.count >= 2
-                MenuSelectionState.shared.showGuides = showGuides
-                MenuSelectionState.shared.smartGuidesEnabled = smartGuidesEnabled
+                syncMenuState()
             }
         }
         .sheet(isPresented: cropSheetBinding) {
@@ -491,14 +477,7 @@ struct CanvasView: View {
                 moveBoardIndex = nil
             }
         }
-        .alert("Can't Add Image", isPresented: Binding(
-            get: { document.importError != nil },
-            set: { isPresented in if !isPresented { document.importError = nil } }
-        ), presenting: document.importError) { _ in
-            Button("OK") { document.importError = nil }
-        } message: { message in
-            Text(message)
-        }
+        .modifier(ImportErrorAlert(document: document))
         .overlay {
             if let previewItemID, let item = document.items.first(where: { $0.id == previewItemID }) {
                 PreviewOverlayView(document: document, item: item, containerSize: viewportSize) {
@@ -610,6 +589,16 @@ struct CanvasView: View {
         }
     }
 
+    /// Pushes this window's current toggles/selection into the shared menu
+    /// state — called whenever this window becomes the one the menus act on.
+    private func syncMenuState() {
+        let state = MenuSelectionState.shared
+        state.hasMultipleSelected = document.selectedIDs.count >= 2
+        state.showGuides = showGuides
+        state.smartGuidesEnabled = smartGuidesEnabled
+        state.showImageCount = showImageCount
+    }
+
     // MARK: - Art boards
 
     @ViewBuilder
@@ -622,7 +611,30 @@ struct CanvasView: View {
         ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
             boardOrderLabel(index)
         }
+        if showImageCount {
+            ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
+                boardImageCountLabel(index)
+            }
+        }
         addBoardButton
+    }
+
+    /// "X images" for one board, on the same baseline as its order number —
+    /// left-aligned 20pt past the number's circle (which is 22pt wide, so
+    /// the text starts 42pt in from the board's left edge). Same font and
+    /// colour as the number, but no circle.
+    private func boardImageCountLabel(_ index: Int) -> some View {
+        let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
+        let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+        let rect = screenRect(origin: origin, size: size)
+        let count = document.items.filter { $0.boardIndex == index && $0.kind == .image }.count
+        let boxWidth: CGFloat = 200
+        return Text(count == 1 ? "1 image" : "\(count) images")
+            .font(.caption.bold())
+            .foregroundStyle(.secondary)
+            .frame(width: boxWidth, alignment: .leading)
+            .position(x: rect.minX + 42 + boxWidth / 2, y: rect.maxY + boardControlsOffset)
+            .allowsHitTesting(false)
     }
 
 
@@ -1462,5 +1474,23 @@ private struct EditMenuCommands: ViewModifier {
 
     private var isKeyWindow: Bool {
         hostWindow != nil && hostWindow === NSApp.keyWindow
+    }
+}
+
+
+/// Split out of `CanvasView.body` purely to keep its modifier chain within
+/// what the type checker can handle in one expression.
+private struct ImportErrorAlert: ViewModifier {
+    @ObservedObject var document: CanvasDocument
+
+    func body(content: Content) -> some View {
+        content.alert("Can't Add Image", isPresented: Binding(
+            get: { document.importError != nil },
+            set: { isPresented in if !isPresented { document.importError = nil } }
+        ), presenting: document.importError) { _ in
+            Button("OK") { document.importError = nil }
+        } message: { message in
+            Text(message)
+        }
     }
 }

@@ -194,7 +194,7 @@ struct LightTableApp: App {
                     NotificationCenter.default.post(name: .toggleSmartGuides, object: nil)
                 }
                 Divider()
-                Button("Toggle Shadows") {
+                Button(shadowSettings.enabled ? "Turn Shadows Off" : "Turn Shadows On") {
                     shadowSettings.enabled.toggle()
                 }
                 Button("Shadow Settings…") {
@@ -204,6 +204,9 @@ struct LightTableApp: App {
                     openWindow(id: "previewBackground")
                 }
                 Divider()
+                Button(menuSelectionState.showImageCount ? "Hide Image Count" : "Show Image Count") {
+                    NotificationCenter.default.post(name: .toggleImageCount, object: nil)
+                }
                 Button("Refresh and Reflow") {
                     NotificationCenter.default.post(name: .refreshAndReflow, object: nil)
                 }
