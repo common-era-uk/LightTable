@@ -1037,6 +1037,64 @@ final class CanvasDocument: ObservableObject {
         save()
     }
 
+    /// Why a single-file rename was refused — each case's description is
+    /// shown to the user as-is.
+    enum RenameError: LocalizedError {
+        case emptyName
+        case invalidCharacters
+        case nameTaken(String)
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyName: return "Enter a name for the file."
+            case .invalidCharacters: return "A file name can't contain \"/\" or \":\", or start with a full stop."
+            case .nameTaken(let name): return "A file named \"\(name)\" already exists in this folder."
+            case .failed(let reason): return "The file couldn't be renamed: \(reason)"
+            }
+        }
+    }
+
+    /// Renames one image card's file on disk and points every card that
+    /// uses that same file at the new name (duplicates can share a file), so
+    /// nothing is orphaned the next time the canvas reloads. Undo moves the
+    /// file back and restores the old names. `newName` is the full file name,
+    /// extension included.
+    func renameFile(of itemID: UUID, to newName: String) throws {
+        guard let item = items.first(where: { $0.id == itemID }), item.kind == .image else { return }
+        let oldName = item.filename
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw RenameError.emptyName }
+        guard !trimmed.contains("/"), !trimmed.contains(":"), !trimmed.hasPrefix(".") else {
+            throw RenameError.invalidCharacters
+        }
+        guard trimmed != oldName else { return }
+
+        let fm = FileManager.default
+        let from = folderURL.appendingPathComponent(oldName)
+        let to = folderURL.appendingPathComponent(trimmed)
+        // A change of letter case only ("a.jpg" → "A.jpg") is the same file
+        // on a case-insensitive volume, so it isn't a clash.
+        let isCaseOnlyChange = trimmed.lowercased() == oldName.lowercased()
+        if fm.fileExists(atPath: to.path), !isCaseOnlyChange {
+            throw RenameError.nameTaken(trimmed)
+        }
+
+        let snapshot = captureSnapshot()
+        do {
+            try fm.moveItem(at: from, to: to)
+        } catch {
+            throw RenameError.failed(error.localizedDescription)
+        }
+
+        let sharingIDs = Set(items.filter { $0.kind == .image && $0.filename == oldName }.map { $0.id })
+        updateItems(sharingIDs) { $0.filename = trimmed }
+        registerUndo(snapshot, actionName: "Rename") { _ in
+            try? fm.moveItem(at: to, to: from)
+        }
+        save()
+    }
+
     /// Replaces an existing image card's file content in place — same
     /// position/size, crop reset to the full new image — used when a file
     /// from Finder is dropped directly onto a card rather than empty canvas.

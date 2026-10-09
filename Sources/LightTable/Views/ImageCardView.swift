@@ -10,6 +10,7 @@ struct ImageCardView: View {
     let itemID: UUID
     @Binding var cropModeItemID: UUID?
     @Binding var inlineCropItemID: UUID?
+    @Binding var renameItemID: UUID?
     @Binding var textFormatItemID: UUID?
     let showFilenames: Bool
     let zoom: CGFloat
@@ -107,6 +108,13 @@ struct ImageCardView: View {
                             }
                         }
                         .keyboardShortcut("c", modifiers: [.command, .shift])
+                        if item.kind == .image, !(document.selectedIDs.contains(itemID) && document.selectedIDs.count > 1) {
+                            Button("Rename…") {
+                                document.selectedGuideID = nil
+                                document.selectedIDs = [itemID]
+                                renameItemID = itemID
+                            }
+                        }
                         Button("Duplicate") {
                             document.duplicateItems(contextMenuTargets())
                         }

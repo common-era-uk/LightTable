@@ -2,6 +2,11 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.8 — 2026-10-09
+
+- Added Rename… to the right-click menu on an image — renames its file in the folder, and the card keeps its place on the canvas.
+- The opening screen now lists your 10 most recently opened light tables — click one to open it.
+
 ## 1.1.7 — 2026-10-04
 
 - Simplified the toolbar — removed the Board Size, Open Folder and Rename All buttons, which are all still in the menus.

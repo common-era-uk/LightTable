@@ -15,6 +15,7 @@ struct RootView: View {
     @State private var openFolderError: String?
     @State private var packageError: String?
     @State private var instanceID = UUID()
+    @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.undoManager) private var undoManager
@@ -220,8 +221,31 @@ struct RootView: View {
                 chooseFolder()
             }
             .keyboardShortcut("o", modifiers: .command)
+
+            if !recentDocuments.urls.isEmpty {
+                recentList
+                    .padding(.top, 12)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The last 10 canvases opened (same list as File > Open Recent), newest
+    /// first — clicking one opens it in this window.
+    private var recentList: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Recent")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+            ForEach(recentDocuments.urls, id: \.self) { url in
+                RecentDocumentRow(url: url) {
+                    requestedURL = url
+                }
+            }
+        }
+        .frame(width: 440)
     }
 
     /// Either a folder or a `.lt` canvas file can be picked directly —
@@ -255,5 +279,44 @@ struct RootView: View {
         if let url = pickFolder() {
             openWindow(value: url)
         }
+    }
+}
+
+
+private struct RecentDocumentRow: View {
+    let url: URL
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.grid.2x2")
+                    .foregroundStyle(.secondary)
+                Text(url.deletingPathExtension().lastPathComponent)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Text(url.deletingLastPathComponent().path.abbreviatingWithTildeInPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .frame(maxWidth: 180, alignment: .trailing)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isHovering ? Color.primary.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(url.path)
+    }
+}
+
+private extension String {
+    var abbreviatingWithTildeInPath: String {
+        (self as NSString).abbreviatingWithTildeInPath
     }
 }
