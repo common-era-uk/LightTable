@@ -3,6 +3,15 @@
     <channel>
         <title>LightTable</title>
         <item>
+            <title>1.1.8</title>
+            <pubDate>Fri, 09 Oct 2026 18:28:05 +0200</pubDate>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>1.1.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.8/LightTable-1.1.8.zip" length="2173954" type="application/octet-stream" sparkle:edSignature="5aEBRp+L1RlWsnGBaEnWXZDzlwHWeKB0mIRYobrc3DiV6gvUcn2Dgzumbdtrp7J+LIzgT+l6ZLFk1iWoGBOWAg=="/>
+        </item>
+        <item>
             <title>1.1.7</title>
             <pubDate>Sun, 04 Oct 2026 11:38:11 +0200</pubDate>
             <sparkle:version>14</sparkle:version>
@@ -19,15 +28,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.6/LightTable-1.1.6.zip" length="2137913" type="application/octet-stream" sparkle:edSignature="HZO7ynhwWerSFfQyuFq3Y/zyQxlNCxjoL59BN6TmXZYLch9zgrZYdDmyajetCVJa6loCRkzcfdLLxcYOENLxBw=="/>
-        </item>
-        <item>
-            <title>1.1.5</title>
-            <pubDate>Sun, 13 Sep 2026 01:12:19 +0100</pubDate>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>1.1.5</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/common-era-uk/LightTable/releases/download/v1.1.5/LightTable-1.1.5.zip" length="2116897" type="application/octet-stream" sparkle:edSignature="jT7DisDJp7ccHbZjQpAq0HJwrfQC1oC7AiVHZ6TTAY14Vw9BBYKOE+GIBFwlEPlGXGCLMZsK2+dwCGqkGkH3AA=="/>
         </item>
     </channel>
 </rss>
