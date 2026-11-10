@@ -180,6 +180,10 @@ struct LightTableApp: App {
                     NotificationCenter.default.post(name: .createGrid, object: nil)
                 }
                 .disabled(!menuSelectionState.hasMultipleSelected)
+                Button("Auto-Translate to Pages…") {
+                    NotificationCenter.default.post(name: .autoTranslateToPages, object: nil)
+                }
+                .disabled(!menuSelectionState.hasMultipleSelected)
                 Divider()
                 Button(menuSelectionState.showGuides ? "Turn Guides Off" : "Turn Guides On") {
                     NotificationCenter.default.post(name: .toggleShowGuides, object: nil)

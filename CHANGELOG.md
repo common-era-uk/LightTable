@@ -2,6 +2,10 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.9 — 2026-11-10
+
+- Added Auto-Translate to Pages — select your images, right-click and choose it (or use the View menu) to turn a free-form layout into fixed pages. Images that sit close together share a page, in reading order, sized to fit your page size and margins.
+
 ## 1.1.8 — 2026-10-09
 
 - Added Rename… to the right-click menu on an image — renames its file in the folder, and the card keeps its place on the canvas.

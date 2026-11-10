@@ -479,6 +479,7 @@ struct CanvasView: View {
             }
         }
         .modifier(ImportErrorAlert(document: document))
+        .modifier(AutoPagesModifier(document: document, hostWindow: hostWindow))
         .modifier(RenameItemSheetModifier(document: document, itemID: $renameItemID))
         .overlay {
             if let previewItemID, let item = document.items.first(where: { $0.id == previewItemID }) {

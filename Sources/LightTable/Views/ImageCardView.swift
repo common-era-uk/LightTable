@@ -99,6 +99,9 @@ struct ImageCardView: View {
                             Button("Create Grid…") {
                                 NotificationCenter.default.post(name: .createGrid, object: nil)
                             }
+                            Button("Auto-Translate to Pages…") {
+                                NotificationCenter.default.post(name: .autoTranslateToPages, object: nil)
+                            }
                             Divider()
                         }
                         Button(item.kind == .text ? "Edit Text" : "Crop") {

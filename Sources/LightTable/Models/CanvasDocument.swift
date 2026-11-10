@@ -1435,6 +1435,108 @@ final class CanvasDocument: ObservableObject {
         save()
     }
 
+    // MARK: - Auto-translate to pages
+
+    /// The page groups `autoTranslateToPages` would produce, board by board
+    /// in board order.
+    private func pageGroups(for images: [CanvasItem], groupingPercent: Double) -> [[UUID]] {
+        var pages: [[UUID]] = []
+        for boardIndex in Set(images.map(\.boardIndex)).sorted() {
+            let entries = images
+                .filter { $0.boardIndex == boardIndex }
+                .map { PageLayout.Entry(id: $0.id, frame: $0.frame) }
+            pages.append(contentsOf: PageLayout.pages(from: entries, groupingPercent: groupingPercent))
+        }
+        return pages
+    }
+
+    /// How many pages the current selection would become at a given
+    /// grouping setting — for the options sheet's live preview.
+    func previewPageCount(for ids: Set<UUID>, groupingPercent: Double) -> Int {
+        pageGroups(for: items.filter { ids.contains($0.id) && $0.kind == .image }, groupingPercent: groupingPercent).count
+    }
+
+    /// Turns a free-form layout into fixed pages: the selected images are
+    /// grouped by proximity (rows top-to-bottom, left-to-right, with a new
+    /// group wherever the gap between neighbours is wide — see
+    /// `PageLayout`), and each group becomes one page, its images resized to
+    /// a shared height that fits inside the page margins. Pages are
+    /// necessarily fixed-size, so the canvas switches to Fixed board size.
+    ///
+    /// If the selection covers every image on the canvas, the existing
+    /// boards are replaced by the new pages (the first board is reused, so
+    /// its colour carries over); otherwise the pages are added after the
+    /// existing boards. Text items are never touched. Returns the number of
+    /// pages created.
+    @discardableResult
+    func autoTranslateToPages(_ ids: Set<UUID>, options: PageLayoutOptions, unit: BoardSizeUnit) -> Int {
+        let selected = items.filter { ids.contains($0.id) && $0.kind == .image }
+        guard !selected.isEmpty else { return 0 }
+        let selectedImageIDs = Set(selected.map(\.id))
+
+        let pages = pageGroups(for: selected, groupingPercent: options.groupingPercent)
+        guard !pages.isEmpty else { return 0 }
+
+        let replacesAllBoards = items.allSatisfy { $0.kind != .image || selectedImageIDs.contains($0.id) }
+
+        let snapshot = captureSnapshot()
+        let previousMode = boardSizeMode
+        let previousWidth = fixedBoardWidth
+        let previousHeight = fixedBoardHeight
+        let previousUnit = boardSizeUnit
+
+        boardSizeMode = .fixed
+        fixedBoardWidth = options.pageWidth
+        fixedBoardHeight = options.pageHeight
+        boardSizeUnit = unit
+
+        let firstPageBoard: Int
+        if replacesAllBoards {
+            let template = boardSizes.first
+            boardSizes = pages.indices.map { index in
+                var board = index == 0 ? (template ?? BoardSize(width: options.pageWidth, height: options.pageHeight))
+                                       : BoardSize(width: options.pageWidth, height: options.pageHeight, color: template?.color)
+                board.width = options.pageWidth
+                board.height = options.pageHeight
+                return board
+            }
+            firstPageBoard = 0
+            // Anything left over (text items) must still point at a board
+            // that exists.
+            for index in items.indices where !selectedImageIDs.contains(items[index].id) {
+                items[index].boardIndex = min(items[index].boardIndex, boardSizes.count - 1)
+            }
+        } else {
+            applyFixedSizeToAllBoards()
+            firstPageBoard = boardSizes.count
+            for _ in pages {
+                boardSizes.append(BoardSize(width: options.pageWidth, height: options.pageHeight))
+            }
+        }
+
+        for (pageIndex, group) in pages.enumerated() {
+            let indices = group.compactMap { id in items.firstIndex { $0.id == id } }
+            let aspects = indices.map { items[$0].height > 0 ? items[$0].width / items[$0].height : 1 }
+            let frames = PageLayout.layout(aspects: aspects, options: options)
+            for (itemIndex, frame) in zip(indices, frames) {
+                items[itemIndex].boardIndex = firstPageBoard + pageIndex
+                items[itemIndex].x = frame.minX
+                items[itemIndex].y = frame.minY
+                items[itemIndex].width = frame.width
+                items[itemIndex].height = frame.height
+            }
+        }
+
+        registerUndo(snapshot, actionName: "Auto-Translate to Pages") { target in
+            target.boardSizeMode = previousMode
+            target.fixedBoardWidth = previousWidth
+            target.fixedBoardHeight = previousHeight
+            target.boardSizeUnit = previousUnit
+        }
+        save()
+        return pages.count
+    }
+
     // MARK: - Reading order
 
     /// Top-to-bottom rows, left-to-right within a row, computed from current
