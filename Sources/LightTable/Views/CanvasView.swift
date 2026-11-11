@@ -63,6 +63,7 @@ struct CanvasView: View {
     @State private var showGuides = true
     @State private var smartGuidesEnabled = true
     @State private var showImageCount = false
+    @AppStorage("showSidebar") private var showSidebar = false
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
     @State private var exportFormatCoordinator: ExportFormatCoordinator?
     @State private var keyMonitor: Any?
@@ -270,6 +271,12 @@ struct CanvasView: View {
         }
         .navigationTitle(document.ltFileURL.deletingPathExtension().lastPathComponent)
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(showSidebar ? "Hide Sidebar" : "Show Sidebar", systemImage: "sidebar.left") {
+                    showSidebar.toggle()
+                }
+                .help(showSidebar ? "Hide the layout templates sidebar" : "Show the layout templates sidebar")
+            }
             ToolbarItemGroup {
                 Text("\(Int(zoom * 100))%")
                     .foregroundStyle(.secondary)
@@ -480,6 +487,7 @@ struct CanvasView: View {
         }
         .modifier(ImportErrorAlert(document: document))
         .modifier(AutoPagesModifier(document: document, hostWindow: hostWindow))
+        .modifier(LayoutTemplateCommands(document: document, hostWindow: hostWindow, pageInView: pageIndexInView))
         .modifier(RenameItemSheetModifier(document: document, itemID: $renameItemID))
         .overlay {
             if let previewItemID, let item = document.items.first(where: { $0.id == previewItemID }) {
@@ -590,6 +598,11 @@ struct CanvasView: View {
         ForEach(document.items) { item in
             ImageCardView(document: document, itemID: item.id, cropModeItemID: $cropModeItemID, inlineCropItemID: $inlineCropItemID, renameItemID: $renameItemID, textFormatItemID: $textFormatItemID, showFilenames: showFilenames, zoom: zoom, smartGuidesEnabled: smartGuidesEnabled, boardOrigin: boardOrigin(for: item.boardIndex))
         }
+    }
+
+    /// The page nearest the middle of what's currently visible.
+    private func pageIndexInView() -> Int {
+        document.boardIndex(at: CGPoint(x: visibleCanvasRect.midX, y: visibleCanvasRect.midY))
     }
 
     /// Pushes this window's current toggles/selection into the shared menu
@@ -1250,6 +1263,13 @@ struct CanvasView: View {
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
             guard event.window === hostWindow else { return event }
             guard cropModeItemID == nil, textFormatItemID == nil, inlineCropItemID == nil, renameItemID == nil, !showRenameSheet else { return event }
+            // The sidebar sits at the window's left edge; scrolling over it
+            // should scroll its own list rather than pan the canvas. Read
+            // from UserDefaults directly: this closure is installed once, so
+            // the `showSidebar` it captured is frozen at whatever it was
+            // when the window opened.
+            if UserDefaults.standard.bool(forKey: "showSidebar"),
+               event.locationInWindow.x <= LayoutTemplateSidebar.width + 1 { return event }
 
             if event.modifierFlags.contains(.command) {
                 let sensitivity: CGFloat = 0.0025

@@ -14,15 +14,34 @@ enum PDFExport {
         }
     }
 
-    /// Renders `boardIndices` (in the order given) as sequential pages of one
-    /// PDF, each page sized to that board's own points-based size — pages
-    /// can vary in size when boards do (Auto mode), which PDF supports
-    /// natively. `dpi` controls the pixel density baked into each page's
-    /// raster content, independent of the page's physical size — higher
-    /// values look sharper without changing how big the page prints. 72 dpi
-    /// matches the app's own on-screen editing resolution (1 point = 1 pixel).
+    /// JPEG quality for photos in the PDF — the trade-off between file size
+    /// and detail.
+    enum ImageQuality: String, CaseIterable, Identifiable {
+        case high = "High"
+        case medium = "Medium"
+        case small = "Small"
+
+        var id: String { rawValue }
+
+        var jpegQuality: CGFloat {
+            switch self {
+            case .high: return 0.85
+            case .medium: return 0.75
+            case .small: return 0.6
+            }
+        }
+    }
+
+    /// Writes `boardIndices` (in the order given) as the pages of one PDF,
+    /// each page sized to its board. Pages are drawn directly rather than
+    /// flattened into one picture each: backgrounds are plain fills, text is
+    /// real (sharp, selectable) text, and each photo is embedded once as a
+    /// JPEG of only its visible part. `dpi` caps how many pixels a photo
+    /// gets per inch of page — never more than the original has — which is
+    /// what keeps file sizes sensible (a 1920 × 1080 px board counts as a
+    /// 26.7 × 15 inch page).
     @MainActor
-    static func export(document: CanvasDocument, boardIndices: [Int], dpi: Double, to url: URL) throws {
+    static func export(document: CanvasDocument, boardIndices: [Int], dpi: Double, quality: ImageQuality, to url: URL) throws {
         guard !boardIndices.isEmpty else { throw ExportError.noBoardsSelected }
         guard let consumer = CGDataConsumer(url: url as CFURL) else { throw ExportError.cannotCreateFile }
 
@@ -42,21 +61,74 @@ enum PDFExport {
             throw ExportError.cannotCreateFile
         }
 
-        let scale = max(dpi / 72.0, 0.1)
+        let pixelsPerPoint = max(dpi / 72.0, 0.1)
         for boardIndex in boardIndices {
             guard document.boardSizes.indices.contains(boardIndex) else { continue }
             let size = document.boardDisplaySize(boardIndex)
-            let pageBox = CGRect(x: 0, y: 0, width: size.width, height: size.height)
-
-            let renderer = ImageRenderer(content: SingleBoardExportView(document: document, boardIndex: boardIndex, size: size))
-            renderer.scale = scale
-            guard let cgImage = renderer.cgImage else { continue }
-
+            let pageBox = CGRect(origin: .zero, size: size)
             let pageInfo = [kCGPDFContextMediaBox as String: NSValue(rect: pageBox)] as CFDictionary
             context.beginPDFPage(pageInfo)
-            context.draw(cgImage, in: pageBox)
+            // Text with the default colour resolves against the current
+            // appearance — pin it to light so dark mode can't turn it white.
+            NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+                drawPage(document: document, boardIndex: boardIndex, size: size,
+                         pixelsPerPoint: pixelsPerPoint, jpegQuality: quality.jpegQuality, in: context)
+            }
             context.endPDFPage()
         }
         context.closePDF()
+    }
+
+    @MainActor
+    private static func drawPage(document: CanvasDocument, boardIndex: Int, size: CGSize, pixelsPerPoint: CGFloat, jpegQuality: CGFloat, in context: CGContext) {
+        context.saveGState()
+        // Work in the canvas's own top-left, y-down coordinates.
+        context.translateBy(x: 0, y: size.height)
+        context.scaleBy(x: 1, y: -1)
+
+        let page = CGRect(origin: .zero, size: size)
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(page)
+        context.setFillColor(NSColor(document.boardColor(boardIndex, fallback: .white)).cgColor)
+        context.fill(page)
+
+        for item in document.items(onBoard: boardIndex) {
+            if item.kind == .text {
+                context.saveGState()
+                context.clip(to: item.frame)
+                context.translateBy(x: item.x, y: item.y)
+                TextItemDrawing.draw(item, size: CGSize(width: item.width, height: item.height), in: context)
+                context.restoreGState()
+            } else {
+                drawImage(item, document: document, pixelsPerPoint: pixelsPerPoint, jpegQuality: jpegQuality, in: context)
+            }
+        }
+        context.restoreGState()
+    }
+
+    /// Same placement as `CroppedImageView`: the crop says which part of
+    /// the whole picture fills the card, so the whole picture spans
+    /// `frame / crop` and is fitted (aspect kept) inside that, then clipped
+    /// to the card.
+    @MainActor
+    private static func drawImage(_ item: CanvasItem, document: CanvasDocument, pixelsPerPoint: CGFloat, jpegQuality: CGFloat, in context: CGContext) {
+        let url = document.folderURL.appendingPathComponent(item.filename)
+        guard let pixelSize = PDFImageEmbedding.orientedPixelSize(of: url) else { return }
+
+        let crop = item.cropRect
+        let innerWidth = item.width / max(crop.width, 0.01)
+        let innerHeight = item.height / max(crop.height, 0.01)
+        let inner = CGRect(x: item.x - crop.minX * innerWidth, y: item.y - crop.minY * innerHeight,
+                           width: innerWidth, height: innerHeight)
+
+        let aspect = pixelSize.width / pixelSize.height
+        let fitted: CGSize = aspect > inner.width / inner.height
+            ? CGSize(width: inner.width, height: inner.width / aspect)
+            : CGSize(width: inner.height * aspect, height: inner.height)
+        let imageRect = CGRect(x: inner.midX - fitted.width / 2, y: inner.midY - fitted.height / 2,
+                               width: fitted.width, height: fitted.height)
+
+        PDFImageEmbedding.draw(url, imageRect: imageRect, clipRect: item.frame,
+                               pixelsPerPoint: pixelsPerPoint, jpegQuality: jpegQuality, in: context)
     }
 }

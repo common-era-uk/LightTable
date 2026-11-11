@@ -110,7 +110,7 @@ private struct CoreTextRenderView: View {
         ])
     }
 
-    private static func draw(item: CanvasItem, size: CGSize, in cgContext: CGContext) {
+    fileprivate static func draw(item: CanvasItem, size: CGSize, in cgContext: CGContext) {
         guard !item.text.isEmpty, size.width > 0, size.height > 0 else { return }
 
         let attributed = attributedString(for: item)
@@ -161,5 +161,14 @@ private struct CoreTextRenderView: View {
         let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: 0, length: 0), path, nil)
         CTFrameDraw(frame, cgContext)
         cgContext.restoreGState()
+    }
+}
+
+/// Draws a text item's content into any top-left (y-down) context with the
+/// exact Core Text rendering the canvas uses — so a PDF export gets real,
+/// selectable vector text that matches the screen.
+enum TextItemDrawing {
+    static func draw(_ item: CanvasItem, size: CGSize, in context: CGContext) {
+        CoreTextRenderView.draw(item: item, size: size, in: context)
     }
 }

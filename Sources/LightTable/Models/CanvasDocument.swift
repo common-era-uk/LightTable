@@ -13,6 +13,13 @@ struct RGBAColor: Codable, Equatable {
     var blue: Double
     var alpha: Double
 
+    init(red: Double, green: Double, blue: Double, alpha: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+
     init(color: Color) {
         let resolved = NSColor(color).usingColorSpace(.deviceRGB) ?? NSColor(color)
         red = Double(resolved.redComponent)
@@ -130,12 +137,17 @@ struct BoardSize: Codable, Equatable, Identifiable {
     /// shared canvas color already used, just with a per-board override
     /// layered on top.
     var color: RGBAColor?
+    /// The layout template last applied to this board (see
+    /// `LayoutTemplate`), so applying a different one knows what to undo —
+    /// its text and background colour. nil if none.
+    var templateID: String?
 
-    init(id: UUID = UUID(), width: Double, height: Double, color: RGBAColor? = nil) {
+    init(id: UUID = UUID(), width: Double, height: Double, color: RGBAColor? = nil, templateID: String? = nil) {
         self.id = id
         self.width = width
         self.height = height
         self.color = color
+        self.templateID = templateID
     }
 
     init(from decoder: Decoder) throws {
@@ -144,6 +156,7 @@ struct BoardSize: Codable, Equatable, Identifiable {
         width = try container.decode(Double.self, forKey: .width)
         height = try container.decode(Double.self, forKey: .height)
         color = try container.decodeIfPresent(RGBAColor.self, forKey: .color)
+        templateID = try container.decodeIfPresent(String.self, forKey: .templateID)
     }
 }
 
@@ -1535,6 +1548,147 @@ final class CanvasDocument: ObservableObject {
         }
         save()
         return pages.count
+    }
+
+    // MARK: - Layout templates
+
+    enum LayoutTemplateError: LocalizedError {
+        case wrongImageCount(template: String, needed: Int, found: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .wrongImageCount(let template, let needed, let found):
+                let neededText = needed == 0 ? "a blank page (no images)" : "\(needed) image\(needed == 1 ? "" : "s")"
+                return "\"\(template)\" needs \(neededText), but this page has \(found). Add or remove images on the page to suit the template, then try again."
+            }
+        }
+    }
+
+    /// Templates are drawn for 1920 × 1080 fixed pages; anything else needs
+    /// converting first.
+    var hasLayoutTemplatePageSize: Bool {
+        boardSizeMode == .fixed && boardSizes.allSatisfy {
+            abs($0.width - LayoutTemplate.pageSize.width) < 0.5 && abs($0.height - LayoutTemplate.pageSize.height) < 0.5
+        }
+    }
+
+    /// A page's images in reading order — the order they're matched to a
+    /// template's slots.
+    private func orderedImages(onBoard index: Int) -> [CanvasItem] {
+        let images = items(onBoard: index).filter { $0.kind == .image }
+        let entries = images.map { PageLayout.Entry(id: $0.id, frame: $0.frame) }
+        let byID = Dictionary(uniqueKeysWithValues: images.map { ($0.id, $0) })
+        return PageLayout.rows(of: entries).flatMap { $0 }.compactMap { byID[$0.id] }
+    }
+
+    /// Throws if the page doesn't have exactly as many images as the
+    /// template has slots — checked before any prompt, so nothing is asked
+    /// for a template that can't apply anyway.
+    func checkLayoutTemplate(_ template: LayoutTemplate, boardIndex: Int) throws {
+        let found = items(onBoard: boardIndex).filter { $0.kind == .image }.count
+        guard found == template.imageSlots.count else {
+            throw LayoutTemplateError.wrongImageCount(template: template.name, needed: template.imageSlots.count, found: found)
+        }
+    }
+
+    /// The width/height of an image's full, uncropped picture.
+    private func fullImageAspect(of item: CanvasItem) -> Double {
+        if let pixelSize = ImageFileSupport.pixelSize(of: folderURL.appendingPathComponent(item.filename)),
+           pixelSize.width > 0, pixelSize.height > 0 {
+            return pixelSize.width / pixelSize.height
+        }
+        guard item.height > 0, item.cropWidth > 0 else { return 1 }
+        return (item.width * item.cropHeight) / (item.height * item.cropWidth)
+    }
+
+    /// Lays a page out to `template`: repositions (and re-crops) its existing
+    /// images into the template's slots, left-to-right, removes any text a
+    /// previous template added and adds this one's, and sets the template's
+    /// background colour (or clears the previous template's). If the canvas
+    /// isn't already 1920 × 1080 fixed pages, every page is switched to that
+    /// first. All one undo step.
+    func applyLayoutTemplate(_ template: LayoutTemplate, toBoard index: Int, photographerName: String?) throws {
+        guard boardSizes.indices.contains(index) else { return }
+        try checkLayoutTemplate(template, boardIndex: index)
+
+        let snapshot = captureSnapshot()
+        let previousMode = boardSizeMode
+        let previousWidth = fixedBoardWidth
+        let previousHeight = fixedBoardHeight
+        let previousUnit = boardSizeUnit
+        let resizesPages = !hasLayoutTemplatePageSize
+        if resizesPages {
+            boardSizeMode = .fixed
+            fixedBoardWidth = LayoutTemplate.pageSize.width
+            fixedBoardHeight = LayoutTemplate.pageSize.height
+            boardSizeUnit = .pixels
+            applyFixedSizeToAllBoards()
+        }
+
+        items.removeAll { $0.boardIndex == index && $0.kind == .text && $0.templateID != nil }
+
+        var board = boardSizes[index]
+        if let previous = board.templateID.flatMap(LayoutTemplate.named), previous.backgroundColor != nil {
+            board.color = nil
+        }
+        if let background = template.backgroundColor {
+            board.color = background
+        }
+        board.templateID = template.id
+        boardSizes[index] = board
+
+        for (image, slot) in zip(orderedImages(onBoard: index), template.imageSlots) {
+            let placement = LayoutTemplate.placement(of: slot, imageAspect: fullImageAspect(of: image))
+            guard let itemIndex = items.firstIndex(where: { $0.id == image.id }) else { continue }
+            items[itemIndex].x = placement.frame.minX
+            items[itemIndex].y = placement.frame.minY
+            items[itemIndex].width = placement.frame.width
+            items[itemIndex].height = placement.frame.height
+            items[itemIndex].cropX = placement.crop.minX
+            items[itemIndex].cropY = placement.crop.minY
+            items[itemIndex].cropWidth = placement.crop.width
+            items[itemIndex].cropHeight = placement.crop.height
+        }
+
+        for element in template.texts {
+            let text = element.isPhotographerName ? (photographerName ?? element.text).uppercased() : element.text
+            items.append(CanvasItem(
+                kind: .text,
+                x: element.frame.minX,
+                y: element.frame.minY,
+                width: element.frame.width,
+                height: element.frame.height,
+                boardIndex: index,
+                text: text,
+                isTextBox: false,
+                fontName: element.fontName,
+                fontSize: element.fontSize,
+                letterSpacing: element.letterSpacing,
+                lineSpacing: 1.2,
+                textAlignment: .center,
+                templateID: template.id
+            ))
+        }
+
+        registerUndo(snapshot, actionName: "Apply Layout") { target in
+            guard resizesPages else { return }
+            target.boardSizeMode = previousMode
+            target.fixedBoardWidth = previousWidth
+            target.fixedBoardHeight = previousHeight
+            target.boardSizeUnit = previousUnit
+        }
+        save()
+    }
+
+    /// The photographer's name currently on a page made with a template
+    /// that has one — used to pre-fill the prompt when re-applying.
+    func templatePhotographerName(onBoard index: Int) -> String? {
+        guard boardSizes.indices.contains(index),
+              let template = boardSizes[index].templateID.flatMap(LayoutTemplate.named),
+              let element = template.texts.first(where: \.isPhotographerName) else { return nil }
+        return items(onBoard: index).first {
+            $0.kind == .text && $0.templateID == template.id && abs($0.y - element.frame.minY) < 1
+        }?.text
     }
 
     // MARK: - Reading order

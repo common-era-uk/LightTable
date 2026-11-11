@@ -10,8 +10,13 @@ struct LightTableApp: App {
     @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
     @ObservedObject private var shadowSettings = ShadowSettings.shared
     @ObservedObject private var menuSelectionState = MenuSelectionState.shared
+    @AppStorage("showSidebar") private var showSidebar = false
 
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+
+    init() {
+        BundledFonts.register()
+    }
 
     var body: some Scene {
         WindowGroup(for: URL.self) { $requestedURL in
@@ -175,6 +180,10 @@ struct LightTableApp: App {
             // bottom of the .newItem group.
             CommandGroup(replacing: .saveItem) {}
             CommandGroup(after: .toolbar) {
+                Button(showSidebar ? "Hide Sidebar" : "Show Sidebar") {
+                    showSidebar.toggle()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
                 Divider()
                 Button("Create Grid…") {
                     NotificationCenter.default.post(name: .createGrid, object: nil)

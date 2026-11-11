@@ -25,6 +25,7 @@ extension Notification.Name {
     static let sendToBack = Notification.Name("LightTable.sendToBack")
     static let createGrid = Notification.Name("LightTable.createGrid")
     static let autoTranslateToPages = Notification.Name("LightTable.autoTranslateToPages")
+    static let applyLayoutTemplate = Notification.Name("LightTable.applyLayoutTemplate")
     static let openBoardSizeDialog = Notification.Name("LightTable.openBoardSizeDialog")
     static let exportPDF = Notification.Name("LightTable.exportPDF")
     static let insertTextField = Notification.Name("LightTable.insertTextField")

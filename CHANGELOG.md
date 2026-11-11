@@ -2,6 +2,17 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.10 — 2026-11-11
+
+- Added a sidebar of layout templates, hidden until you open it (View > Show Sidebar, ⌃⌘S, or the toolbar button). Click one to lay out the selected page, or the one in view, using the images already on it: Title, Two Portraits, Half Bleed Left/Right, Full Bleed, Single Landscape, Three Portraits and Closing.
+- If a page has the wrong number of images for a template, you're told how many it needs. Templates use 1920 × 1080 pages, and offer to switch every page to that size if needed.
+- The Title template asks for the photographer's name. Half and full bleed images are cropped to fill their space, centred.
+- The fonts the templates use now come with the app.
+- Fixed the sidebar not scrolling when the window is too short to show every template.
+- PDF exports are now far smaller, about a tenth of the size: photos are compressed, and only the visible part of each is included, never above its original resolution. Text in the PDF is now real text, sharp at any zoom.
+- Added an Image quality choice (High, Medium, Small) to Export as PDF.
+- Export as PDF now includes all art boards by default; untick "All art boards" to pick specific ones.
+
 ## 1.1.9 — 2026-11-10
 
 - Added Auto-Translate to Pages — select your images, right-click and choose it (or use the View menu) to turn a free-form layout into fixed pages. Images that sit close together share a page, in reading order, sized to fit your page size and margins.

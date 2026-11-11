@@ -16,6 +16,7 @@ struct RootView: View {
     @State private var packageError: String?
     @State private var instanceID = UUID()
     @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
+    @AppStorage("showSidebar") private var showSidebar = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.undoManager) private var undoManager
@@ -23,7 +24,13 @@ struct RootView: View {
     var body: some View {
         Group {
             if let document {
-                CanvasView(document: document, hostWindow: $hostWindow, onChangeFolder: openFolderInNewWindow)
+                HStack(spacing: 0) {
+                    if showSidebar {
+                        LayoutTemplateSidebar()
+                        Divider()
+                    }
+                    CanvasView(document: document, hostWindow: $hostWindow, onChangeFolder: openFolderInNewWindow)
+                }
             } else {
                 openFolderPrompt
             }

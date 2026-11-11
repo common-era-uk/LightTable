@@ -60,6 +60,9 @@ struct CanvasItem: Identifiable, Codable, Equatable {
     var textAlignment: TextAlignmentOption
     /// nil means the default (primary/label) text color.
     var textColor: RGBAColor?
+    /// Set on text a layout template added (the template's id), so applying
+    /// a different template removes it while leaving the user's own text.
+    var templateID: String?
 
     init(
         id: UUID = UUID(),
@@ -84,7 +87,8 @@ struct CanvasItem: Identifiable, Codable, Equatable {
         letterSpacing: Double = 0,
         lineSpacing: Double = 1.2,
         textAlignment: TextAlignmentOption = .leading,
-        textColor: RGBAColor? = nil
+        textColor: RGBAColor? = nil,
+        templateID: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -109,6 +113,7 @@ struct CanvasItem: Identifiable, Codable, Equatable {
         self.lineSpacing = lineSpacing
         self.textAlignment = textAlignment
         self.textColor = textColor
+        self.templateID = templateID
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +141,7 @@ struct CanvasItem: Identifiable, Codable, Equatable {
         lineSpacing = try container.decodeIfPresent(Double.self, forKey: .lineSpacing) ?? 1.2
         textAlignment = try container.decodeIfPresent(TextAlignmentOption.self, forKey: .textAlignment) ?? .leading
         textColor = try container.decodeIfPresent(RGBAColor.self, forKey: .textColor)
+        templateID = try container.decodeIfPresent(String.self, forKey: .templateID)
     }
 
     var frame: CGRect {
