@@ -2,6 +2,10 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.11 — 2026-11-11
+
+- When adjusting a crop by double-clicking an image, hold Shift while dragging the image to move it in a straight line.
+
 ## 1.1.10 — 2026-11-11
 
 - Added a sidebar of layout templates, hidden until you open it (View > Show Sidebar, ⌃⌘S, or the toolbar button). Click one to lay out the selected page, or the one in view, using the images already on it: Title, Two Portraits, Half Bleed Left/Right, Full Bleed, Single Landscape, Three Portraits and Closing.

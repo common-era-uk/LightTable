@@ -1341,13 +1341,15 @@ struct ImageCardView: View {
 
     /// Plain translate, unclamped — the image is explicitly allowed to move
     /// past the frame's edges (or shrink smaller than it) since that's what
-    /// crops it.
+    /// crops it. Holding ⇧ keeps it to a straight horizontal or vertical
+    /// line, the same as moving a card.
     private var inlineImageMoveGesture: some Gesture {
         DragGesture(minimumDistance: 2, coordinateSpace: .named("canvas"))
             .onChanged { value in
                 let baseline = inlineImageBaseline ?? inlineImageRect ?? .zero
                 if inlineImageBaseline == nil { inlineImageBaseline = baseline }
-                inlineImageRect = baseline.offsetBy(dx: value.translation.width, dy: value.translation.height)
+                let translation = axisConstrained(value.translation)
+                inlineImageRect = baseline.offsetBy(dx: translation.width, dy: translation.height)
             }
             .onEnded { _ in inlineImageBaseline = nil }
     }
