@@ -12,7 +12,7 @@ struct LayoutTemplateSidebar: View {
                 Text("Layout Templates")
                     .font(.headline)
                     .foregroundStyle(.secondary)
-                Text("Click to lay out the selected page — or the one in view — using its existing images.")
+                Text("Click to lay out the active art board — or the one in view — using its existing images.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

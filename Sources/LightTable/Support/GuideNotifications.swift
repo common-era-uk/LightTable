@@ -35,4 +35,7 @@ extension Notification.Name {
     static let pasteSelected = Notification.Name("LightTable.pasteSelected")
     static let toggleSmartGuides = Notification.Name("LightTable.toggleSmartGuides")
     static let toggleImageCount = Notification.Name("LightTable.toggleImageCount")
+    /// Posted with the document as `object` and the board's index under
+    /// "index" — scrolls that document's canvas to the board.
+    static let scrollToBoard = Notification.Name("LightTable.scrollToBoard")
 }

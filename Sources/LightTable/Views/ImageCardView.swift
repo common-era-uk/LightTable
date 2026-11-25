@@ -356,11 +356,30 @@ struct ImageCardView: View {
                 let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
                 let (offset, guides, spacingGaps) = smartAlignedOffset(guideSnapped)
                 document.groupDragOffset = offset
-                document.activeSmartGuides = guides
-                document.activeSpacingGaps = spacingGaps
+                // Over the Art Boards panel: show the floating preview,
+                // highlight the thumbnail under the cursor, and drop the
+                // alignment guides, which no longer mean anything.
+                let cursor = document.windowPoint(fromCanvas: value.location)
+                let hit = document.boardPanelHit(at: cursor)
+                if document.boardPanelDropTarget != hit.board { document.boardPanelDropTarget = hit.board }
+                document.boardPanelDragPreview = hit.overPanel ? cursor : nil
+                document.activeSmartGuides = hit.overPanel ? [] : guides
+                document.activeSpacingGaps = hit.overPanel ? [] : spacingGaps
             }
             .onEnded { value in
                 let ids = document.selectedIDs
+                let hit = document.boardPanelHit(at: document.windowPoint(fromCanvas: value.location))
+                document.boardPanelDropTarget = nil
+                document.boardPanelDragPreview = nil
+                // Dropped on the Art Boards panel: onto a thumbnail moves the
+                // cards to that board; anywhere else on the panel cancels.
+                if hit.overPanel {
+                    document.groupDragOffset = .zero
+                    document.activeSmartGuides = []
+                    document.activeSpacingGaps = []
+                    if let target = hit.board { document.moveItems(ids, toBoard: target) }
+                    return
+                }
                 let baseline = (item?.frame ?? .zero).offsetBy(dx: boardOrigin.x, dy: boardOrigin.y)
                 let guideSnapped = snappedOffset(clampedGroupOffset(axisConstrained(value.translation)), baseline: baseline)
                 let (offset, _, _) = smartAlignedOffset(guideSnapped)

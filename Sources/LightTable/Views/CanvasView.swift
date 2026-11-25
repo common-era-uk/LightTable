@@ -64,6 +64,7 @@ struct CanvasView: View {
     @State private var smartGuidesEnabled = true
     @State private var showImageCount = false
     @AppStorage("showSidebar") private var showSidebar = false
+    @AppStorage("showBoardPanel") private var showBoardPanel = false
     @State private var colorPanelCoordinator: ColorPanelCoordinator?
     @State private var exportFormatCoordinator: ExportFormatCoordinator?
     @State private var keyMonitor: Any?
@@ -247,6 +248,7 @@ struct CanvasView: View {
                 if inlineCropItemID != nil {
                     inlineCropItemID = nil
                 }
+                if let index = hoveredBoardIndex { document.setActiveBoard(index) }
                 document.selectedIDs = []
                 document.selectedGuideID = nil
                 if textFormatItemID != nil {
@@ -268,6 +270,7 @@ struct CanvasView: View {
                 boardContextMenuContent
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { viewportSize = $0 }
+            .modifier(CanvasWindowMapping(document: document, zoom: zoom, panOffset: panOffset))
         }
         .navigationTitle(document.ltFileURL.deletingPathExtension().lastPathComponent)
         .toolbar {
@@ -361,8 +364,14 @@ struct CanvasView: View {
                 }
                 .disabled(document.items.isEmpty)
                 .help("Save whole canvas as an image")
+                Divider()
+                Button(showBoardPanel ? "Hide Art Boards" : "Show Art Boards", systemImage: "sidebar.right") {
+                    showBoardPanel.toggle()
+                }
+                .help(showBoardPanel ? "Hide the art boards panel" : "Show thumbnails of every art board")
             }
         }
+        .modifier(ScrollToBoardHandler(document: document, zoom: zoom, viewportSize: viewportSize, panOffset: $panOffset))
         .onReceive(NotificationCenter.default.publisher(for: .toggleShowGuides)) { _ in
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             showGuides.toggle()
@@ -419,6 +428,8 @@ struct CanvasView: View {
             if document.selectedIDs.count >= 2 { showCreateGridSheet = true }
         }
         .onChange(of: document.selectedIDs) { _, newValue in
+            let boards = Set(document.items.filter { newValue.contains($0.id) }.map(\.boardIndex))
+            if boards.count == 1, let board = boards.first { document.setActiveBoard(board) }
             guard hostWindow != nil, hostWindow === NSApp.keyWindow else { return }
             MenuSelectionState.shared.hasMultipleSelected = newValue.count >= 2
         }
@@ -624,6 +635,9 @@ struct CanvasView: View {
                 boardEdgeHandles(index)
             }
         }
+        if document.boardSizes.count > 1, let active = document.activeBoardIndex {
+            activeBoardOutline(active)
+        }
         ForEach(Array(document.boardSizes.enumerated()), id: \.element.id) { index, _ in
             boardOrderLabel(index)
         }
@@ -654,17 +668,31 @@ struct CanvasView: View {
     }
 
 
+    /// The active board's outline — in screen space, so it's the same
+    /// weight at any zoom. Only shown when there's more than one board.
+    private func activeBoardOutline(_ index: Int) -> some View {
+        let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
+        let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
+        let rect = screenRect(origin: origin, size: size).insetBy(dx: -2, dy: -2)
+        return Rectangle()
+            .stroke(Color.accentColor, lineWidth: 2)
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+            .allowsHitTesting(false)
+    }
+
     /// The small order number below-left of each board, in the outer
     /// (screen) coordinate space so it stays a fixed size regardless of zoom.
     private func boardOrderLabel(_ index: Int) -> some View {
         let origin = boardOrigins.indices.contains(index) ? boardOrigins[index] : .zero
         let size = boardSizesDisplay.indices.contains(index) ? boardSizesDisplay[index] : .zero
         let rect = screenRect(origin: origin, size: size)
+        let isActive = document.boardSizes.count > 1 && document.activeBoardIndex == index
         return Text("\(index + 1)")
             .font(.caption.bold())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(isActive ? Color.white : Color.secondary)
             .frame(width: 22, height: 22)
-            .background(Color.primary.opacity(0.08), in: Circle())
+            .background(isActive ? Color.accentColor : Color.primary.opacity(0.08), in: Circle())
             .position(x: rect.minX + 11, y: rect.maxY + boardControlsOffset)
             .allowsHitTesting(false)
     }
@@ -718,13 +746,30 @@ struct CanvasView: View {
         }
     }
 
+    /// Where pasted or newly added things go: the active board if there is
+    /// one — centred on the part of it that's on screen, or on the whole
+    /// board if it's scrolled out of view — otherwise the board in the
+    /// middle of the view, at the view's centre. Returns the board and a
+    /// point local to it.
+    private func placementTarget() -> (Int, CGPoint) {
+        let visible = visibleCanvasRect
+        if let index = document.activeBoardIndex {
+            let origin = boardOrigin(for: index)
+            let boardRect = CGRect(origin: origin, size: document.boardDisplaySize(index))
+            let shown = boardRect.intersection(visible)
+            let target = shown.isNull || shown.isEmpty ? boardRect : shown
+            return (index, CGPoint(x: target.midX - origin.x, y: target.midY - origin.y))
+        }
+        let centerGlobal = CGPoint(x: visible.midX, y: visible.midY)
+        let boardIndex = document.boardIndex(at: centerGlobal)
+        let origin = boardOrigin(for: boardIndex)
+        return (boardIndex, CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y))
+    }
+
     /// Adds a new text item centered in whatever's currently visible, and
     /// immediately opens it for editing so the user can start typing.
     private func addTextItem(isBox: Bool) {
-        let centerGlobal = CGPoint(x: visibleCanvasRect.midX, y: visibleCanvasRect.midY)
-        let boardIndex = document.boardIndex(at: centerGlobal)
-        let origin = boardOrigin(for: boardIndex)
-        let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
+        let (boardIndex, localPoint) = placementTarget()
         let newID = document.addTextItem(isBox: isBox, at: localPoint, boardIndex: boardIndex)
         document.registerUndoCheckpoint(actionName: "Edit Text")
         textFormatItemID = newID
@@ -733,10 +778,7 @@ struct CanvasView: View {
     /// Pastes the clipboard centered in whatever's currently visible, same
     /// placement convention as `addTextItem`.
     private func performPaste() {
-        let centerGlobal = CGPoint(x: visibleCanvasRect.midX, y: visibleCanvasRect.midY)
-        let boardIndex = document.boardIndex(at: centerGlobal)
-        let origin = boardOrigin(for: boardIndex)
-        let localPoint = CGPoint(x: centerGlobal.x - origin.x, y: centerGlobal.y - origin.y)
+        let (boardIndex, localPoint) = placementTarget()
         document.pasteFromClipboard(at: localPoint, boardIndex: boardIndex)
     }
 
@@ -1270,6 +1312,10 @@ struct CanvasView: View {
             // when the window opened.
             if UserDefaults.standard.bool(forKey: "showSidebar"),
                event.locationInWindow.x <= LayoutTemplateSidebar.width + 1 { return event }
+            // Same for the art boards panel at the right edge.
+            if UserDefaults.standard.bool(forKey: "showBoardPanel"),
+               let contentWidth = hostWindow?.contentView?.bounds.width,
+               event.locationInWindow.x >= contentWidth - BoardPanel.currentWidth - 1 { return event }
 
             if event.modifierFlags.contains(.command) {
                 let sensitivity: CGFloat = 0.0025
@@ -1515,5 +1561,51 @@ private struct ImportErrorAlert: ViewModifier {
         } message: { message in
             Text(message)
         }
+    }
+}
+
+/// Scrolls the canvas to a board when its thumbnail in the Art Boards panel
+/// is clicked: centred across, and centred down too if it fits on screen,
+/// otherwise with its top edge near the top.
+private struct ScrollToBoardHandler: ViewModifier {
+    let document: CanvasDocument
+    let zoom: CGFloat
+    let viewportSize: CGSize
+    @Binding var panOffset: CGSize
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .scrollToBoard, object: document)) { note in
+            guard let index = note.userInfo?["index"] as? Int, document.boardSizes.indices.contains(index) else { return }
+            let origins = document.boardOrigins()
+            guard origins.indices.contains(index) else { return }
+            let origin = origins[index]
+            let size = document.boardDisplaySize(index)
+            let margin: CGFloat = 40
+            let x = viewportSize.width / 2 - (origin.x + size.width / 2) * zoom
+            let y = size.height * zoom <= viewportSize.height - margin * 2
+                ? viewportSize.height / 2 - (origin.y + size.height / 2) * zoom
+                : margin - origin.y * zoom
+            withAnimation(.easeInOut(duration: 0.25)) {
+                panOffset = CGSize(width: x, height: y)
+            }
+        }
+    }
+}
+
+/// Keeps the document's record of where the canvas sits in the window (and
+/// its zoom and pan) current, so a card drag can translate the cursor into
+/// window space and tell when it's over the Art Boards panel.
+private struct CanvasWindowMapping: ViewModifier {
+    let document: CanvasDocument
+    let zoom: CGFloat
+    let panOffset: CGSize
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGPoint.self) { $0.frame(in: .named("lightTableWindow")).origin } action: {
+                document.canvasViewportOrigin = $0
+            }
+            .onChange(of: zoom, initial: true) { _, value in document.canvasZoom = value }
+            .onChange(of: panOffset, initial: true) { _, value in document.canvasPan = value }
     }
 }

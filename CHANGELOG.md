@@ -2,6 +2,14 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.12 — 2026-11-25
+
+- Added an Art Boards panel on the right of the window (View > Show Art Boards Panel, ⌃⌘B, or the toolbar button), showing a thumbnail of every art board.
+- Drag the panel's left edge to widen it and the thumbnails wrap side by side.
+- Click a thumbnail to jump to that board, or drag thumbnails to reorder the boards.
+- Drag images from the canvas onto a thumbnail to move them to that board.
+- Clicking an art board, anything on it, or its thumbnail now makes it the active board, outlined in blue. Paste, new text and layout templates go to the active board rather than the one in the middle of the view.
+
 ## 1.1.11 — 2026-11-11
 
 - When adjusting a crop by double-clicking an image, hold Shift while dragging the image to move it in a straight line.

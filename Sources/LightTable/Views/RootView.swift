@@ -17,6 +17,7 @@ struct RootView: View {
     @State private var instanceID = UUID()
     @ObservedObject private var recentDocuments = RecentDocumentsStore.shared
     @AppStorage("showSidebar") private var showSidebar = false
+    @AppStorage("showBoardPanel") private var showBoardPanel = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.undoManager) private var undoManager
@@ -30,7 +31,13 @@ struct RootView: View {
                         Divider()
                     }
                     CanvasView(document: document, hostWindow: $hostWindow, onChangeFolder: openFolderInNewWindow)
+                    if showBoardPanel {
+                        Divider()
+                        BoardPanel(document: document)
+                    }
                 }
+                .coordinateSpace(name: "lightTableWindow")
+                .overlay(alignment: .topLeading) { BoardPanelDragPreview(document: document) }
             } else {
                 openFolderPrompt
             }

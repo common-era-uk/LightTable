@@ -65,7 +65,9 @@ struct LayoutTemplateCommands: ViewModifier {
     private func begin(_ template: LayoutTemplate) {
         let selectedBoards = Set(document.items.filter { document.selectedIDs.contains($0.id) }.map(\.boardIndex))
         let boardIndex: Int
-        if selectedBoards.count > 1 {
+        if let active = document.activeBoardIndex {
+            boardIndex = active
+        } else if selectedBoards.count > 1 {
             errorMessage = "The selection is spread across more than one page. Select images on just one page, then try again."
             return
         } else if let only = selectedBoards.first {

@@ -269,6 +269,29 @@ final class CanvasDocument: ObservableObject {
     /// Live, uncommitted translation applied to all selected items while a
     /// group drag is in progress (visual preview only).
     @Published var groupDragOffset: CGSize = .zero
+    /// While cards are being dragged, the art board whose thumbnail in the
+    /// Art Boards panel is under the cursor — dropping there moves them to
+    /// that board. Transient, never saved.
+    @Published var boardPanelDropTarget: Int?
+    /// While cards are being dragged over the Art Boards panel, the cursor's
+    /// position in the window ("lightTableWindow" space) — drives the
+    /// floating preview drawn above the panel. nil otherwise.
+    @Published var boardPanelDragPreview: CGPoint?
+    /// The art board that paste, new text and layout templates aim at —
+    /// set by clicking a board (or anything on it) or its thumbnail. Held by
+    /// id so it follows the board when boards are reordered. Never saved.
+    @Published var activeBoardID: UUID?
+
+    // Where things are on screen, in the window-wide "lightTableWindow"
+    // coordinate space, so a card drag on the canvas can tell when it's over
+    // the Art Boards panel. Plain stored values (not published): they're
+    // read during a drag, never drawn from.
+    var canvasViewportOrigin: CGPoint = .zero
+    var canvasZoom: CGFloat = 1
+    var canvasPan: CGSize = .zero
+    var boardPanelFrame: CGRect = .zero
+    var boardPanelScrollFrame: CGRect = .zero
+    var boardPanelCellFrames: [UUID: CGRect] = [:]
     /// PowerPoint/Keynote-style alignment guides shown while dragging — up
     /// to one vertical and one horizontal line, recomputed every drag frame
     /// from the dragged selection's edges/center matching another item's on
@@ -456,6 +479,52 @@ final class CanvasDocument: ObservableObject {
                 items[i].boardIndex = newIndex
             }
         }
+        save()
+    }
+
+    var activeBoardIndex: Int? {
+        guard let activeBoardID else { return nil }
+        return boardSizes.firstIndex { $0.id == activeBoardID }
+    }
+
+    func setActiveBoard(_ index: Int) {
+        guard boardSizes.indices.contains(index) else { return }
+        let id = boardSizes[index].id
+        if activeBoardID != id { activeBoardID = id }
+    }
+
+    /// A point in the canvas's own (zoomed, panned) space, in window space.
+    func windowPoint(fromCanvas point: CGPoint) -> CGPoint {
+        CGPoint(x: canvasViewportOrigin.x + canvasPan.width + point.x * canvasZoom,
+                y: canvasViewportOrigin.y + canvasPan.height + point.y * canvasZoom)
+    }
+
+    /// Whether a window-space point is over the Art Boards panel, and if so
+    /// which board's thumbnail (if any) it's on — only counting the part of
+    /// the panel's list that's actually scrolled into view.
+    func boardPanelHit(at point: CGPoint) -> (overPanel: Bool, board: Int?) {
+        guard boardPanelFrame.width > 0, boardPanelFrame.contains(point) else { return (false, nil) }
+        guard boardPanelScrollFrame.contains(point) else { return (true, nil) }
+        for (index, board) in boardSizes.enumerated() {
+            if let frame = boardPanelCellFrames[board.id], frame.contains(point) { return (true, index) }
+        }
+        return (true, nil)
+    }
+
+    /// Moves items onto board `target`, each keeping its position relative
+    /// to its board's top-left — what dropping cards onto a thumbnail in the
+    /// Art Boards panel does. They land on top of what's already there.
+    func moveItems(_ ids: Set<UUID>, toBoard target: Int) {
+        guard boardSizes.indices.contains(target),
+              items.contains(where: { ids.contains($0.id) && $0.boardIndex != target }) else { return }
+        registerUndoCheckpoint(actionName: "Move to Art Board")
+        let moving = items.filter { ids.contains($0.id) }.map { item -> CanvasItem in
+            var moved = item
+            moved.boardIndex = target
+            return moved
+        }
+        items.removeAll { ids.contains($0.id) }
+        items.append(contentsOf: moving)
         save()
     }
 

@@ -11,6 +11,7 @@ struct LightTableApp: App {
     @ObservedObject private var shadowSettings = ShadowSettings.shared
     @ObservedObject private var menuSelectionState = MenuSelectionState.shared
     @AppStorage("showSidebar") private var showSidebar = false
+    @AppStorage("showBoardPanel") private var showBoardPanel = false
 
     private let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
@@ -184,6 +185,10 @@ struct LightTableApp: App {
                     showSidebar.toggle()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .control])
+                Button(showBoardPanel ? "Hide Art Boards Panel" : "Show Art Boards Panel") {
+                    showBoardPanel.toggle()
+                }
+                .keyboardShortcut("b", modifiers: [.command, .control])
                 Divider()
                 Button("Create Grid…") {
                     NotificationCenter.default.post(name: .createGrid, object: nil)
