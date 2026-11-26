@@ -2,6 +2,10 @@
 
 What's changed in LightTable, most recent first. Written in plain terms, not developer notes.
 
+## 1.1.13 — 2026-11-26
+
+- Added a + button at the bottom right of the Art Boards panel that adds a new art board at the end, makes it the active board and scrolls to it.
+
 ## 1.1.12 — 2026-11-25
 
 - Added an Art Boards panel on the right of the window (View > Show Art Boards Panel, ⌃⌘B, or the toolbar button), showing a thumbnail of every art board.

@@ -42,13 +42,31 @@ struct BoardPanel: View {
                 .padding(.horizontal, Self.padding)
                 .padding(.top, Self.padding)
                 .padding(.bottom, 8)
-            ScrollView {
-                grid
-                    .padding(Self.padding)
-                    .frame(maxWidth: .infinity)
-            }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("lightTableWindow")) } action: {
-                document.boardPanelScrollFrame = $0
+            ScrollViewReader { proxy in
+                ScrollView {
+                    grid
+                        .padding(Self.padding)
+                        .frame(maxWidth: .infinity)
+                }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("lightTableWindow")) } action: {
+                    document.boardPanelScrollFrame = $0
+                }
+                Divider()
+                HStack {
+                    Spacer()
+                    Button {
+                        addBoard(scrollingWith: proxy)
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 20))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add an art board at the end")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
         }
         .frame(width: panelWidth)
@@ -61,6 +79,19 @@ struct BoardPanel: View {
             document.boardPanelFrame = .zero
             document.boardPanelScrollFrame = .zero
             document.boardPanelCellFrames = [:]
+        }
+    }
+
+    /// Appends a board, makes it the active one, and brings it into view
+    /// both here and on the canvas.
+    private func addBoard(scrollingWith proxy: ScrollViewProxy) {
+        document.addBoard()
+        let index = document.boardSizes.count - 1
+        guard let id = document.boardSizes.last?.id else { return }
+        document.setActiveBoard(index)
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .bottom) }
+            NotificationCenter.default.post(name: .scrollToBoard, object: document, userInfo: ["index": index])
         }
     }
 
@@ -86,6 +117,7 @@ struct BoardPanel: View {
                     .gesture(reorderGesture(index))
                     .onHover { hoveredIndex = $0 ? index : (hoveredIndex == index ? nil : hoveredIndex) }
                     .help("Board \(index + 1) — click to go to it, drag to reorder")
+                    .id(board.id)
             }
         }
         .coordinateSpace(name: "boardPanelGrid")
